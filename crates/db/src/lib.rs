@@ -11,8 +11,8 @@ pub mod queue;
 pub mod schema;
 
 pub use client::{
-    acquire_db_lock, create_local_db, import_from_postgres, is_db_unavailable, local_db_path, open_db, DbError, DbHandle,
-    DbLock, DB_BUSY_PREFIX, DB_UNAVAILABLE_PREFIX, IMPORT_TABLES, LOCAL_DB_FILE,
+    acquire_db_lock, create_local_db, import_from_postgres, import_tables, is_db_unavailable, local_db_path, open_db, DbError, DbHandle,
+    DbLock, DB_BUSY_PREFIX, DB_UNAVAILABLE_PREFIX, IMPORT_TABLES, LOCAL_DB_FILE, MIGRATE_TABLES,
 };
 pub use guard::{assert_local_database_url, cloud_database_url_reason, looks_like_cloud_database_url, CloudDatabaseUrlError};
 pub use health::{check_embedded_db, DbHealth, EXPECTED_TABLES};

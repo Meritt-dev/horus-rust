@@ -382,6 +382,18 @@ pub enum DbCommand {
         about = "One-time import of a legacy Postgres into the embedded database (--from defaults to $DATABASE_URL)"
     )]
     Import(DbImportArgs),
+    #[command(
+        name = "migrate-from-ts",
+        about = "Copy history from the TypeScript Horus database (~/.horus/horus.db) into this one (needs node/npx)"
+    )]
+    MigrateFromTs(DbMigrateFromTsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DbMigrateFromTsArgs {
+    /// TS PGlite data directory (default: horus.db beside this CLI's database, i.e. ~/.horus/horus.db)
+    #[arg(long, value_name = "dir")]
+    pub from: Option<String>,
 }
 
 #[derive(Debug, Args)]

@@ -37,8 +37,10 @@ pub fn is_suppressed() -> bool {
 }
 
 /// The one-line dim hint shown when the CLI is behind the latest release.
+/// npm/Homebrew installs also name the package-manager command `horus update` runs (Rust-only).
 pub fn format_hint(latest: &str, current: &str) -> String {
-    format!("{}\n", dim(&format!("  A newer Horus is available: {latest} (you're on {current}). Run `horus update`.")))
+    let via = crate::commands::update::package_manager_hint().map(|c| format!(" (or `{c}`)")).unwrap_or_default();
+    format!("{}\n", dim(&format!("  A newer Horus is available: {latest} (you're on {current}). Run `horus update`{via}.")))
 }
 
 fn read_cache(path: &Path) -> Option<UpdateCache> {

@@ -1,5 +1,5 @@
 # Custom dist publish job (dist-workspace.toml: publish-jobs = ["./publish-homebrew"]).
-# Pushes the generated horus-rs.rb formula to Meritt-dev/homebrew-tap using a deploy key scoped to
+# Pushes the generated horus.rb formula to Meritt-dev/homebrew-tap using a deploy key scoped to
 # that one repo (secret HOMEBREW_TAP_DEPLOY_KEY), instead of a personal access token.
 # Skips cleanly when the secret is absent.
 name: Publish Homebrew formula
@@ -37,7 +37,7 @@ jobs:
       - name: Commit formula
         if: env.DEPLOY_KEY != ''
         run: |
-          git config --global user.name "horus-rs release"
+          git config --global user.name "horus release"
           git config --global user.email "noreply@github.com"
           # Keep only formula files from the artifacts; everything else is release archives.
           find Formula -maxdepth 1 -type f ! -name '*.rb' -delete

@@ -42,8 +42,7 @@ fn installer_hint() -> String {
     )
 }
 
-/// The executable's file name (`horus-rs`, so it installs beside the TS `horus`). Archives,
-/// npm packages and the Homebrew formula all ship it under this name.
+/// The executable's file name inside the release archives (`horus`).
 const BIN: &str = env!("CARGO_BIN_NAME");
 
 /// The dist target this binary was built for; names its release archive. Linux always maps to
@@ -61,11 +60,11 @@ const TARGET: &str = if cfg!(all(target_os = "macos", target_arch = "aarch64")) 
 /// How this binary was installed, from its resolved path.
 #[derive(Debug, PartialEq)]
 enum Channel {
-    /// `<prefix>/lib/node_modules/<launcher>-<os>-<cpu>/bin/horus-rs`: (npm prefix, launcher name).
+    /// `<prefix>/lib/node_modules/<launcher>-<os>-<cpu>/bin/horus`: (npm prefix, launcher name).
     NpmGlobal(PathBuf, String),
     /// Under some other `node_modules` (a project dependency): launcher name.
     NpmLocal(String),
-    /// `<prefix>/Cellar/<formula>/<version>/bin/horus-rs`: the stable `<prefix>/opt/<formula>/bin/horus-rs`.
+    /// `<prefix>/Cellar/<formula>/<version>/bin/<exe>`: (formula, the stable `<prefix>/opt/<formula>/bin/<exe>`).
     Homebrew(String, PathBuf),
     Standalone,
 }
@@ -74,7 +73,8 @@ fn detect_channel(exe: &Path) -> Channel {
     let s = exe.to_string_lossy();
     if let Some((prefix, rest)) = s.split_once("/Cellar/") {
         let formula = rest.split('/').next().unwrap_or(BIN).to_string();
-        let opt_bin = Path::new(prefix).join("opt").join(&formula).join("bin").join(BIN);
+        let exe_name = exe.file_name().map(|n| n.to_os_string()).unwrap_or_else(|| BIN.into());
+        let opt_bin = Path::new(prefix).join("opt").join(&formula).join("bin").join(exe_name);
         return Channel::Homebrew(formula, opt_bin);
     }
     if s.contains("/node_modules/") {
@@ -86,7 +86,11 @@ fn detect_channel(exe: &Path) -> Channel {
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
             .and_then(|j| j.get("name")?.as_str().map(str::to_string));
         if let Some(name) = name {
-            let launcher = name.rsplitn(3, '-').nth(2).unwrap_or(&name).to_string();
+            let mut launcher = name.rsplitn(3, '-').nth(2).unwrap_or(&name).to_string();
+            // Pre-0.24 side-by-side builds shipped as `<scope>/horus-rs`; it's `<scope>/horus` now.
+            if let Some(scope) = launcher.strip_suffix("/horus-rs") {
+                launcher = format!("{scope}/horus");
+            }
             return match s.split_once("/lib/node_modules/") {
                 Some((prefix, _)) => Channel::NpmGlobal(PathBuf::from(prefix), launcher),
                 None => Channel::NpmLocal(launcher),
@@ -94,6 +98,17 @@ fn detect_channel(exe: &Path) -> Channel {
         }
     }
     Channel::Standalone
+}
+
+/// The package-manager command `horus update` would run for this install, for the update notice.
+pub fn package_manager_hint() -> Option<String> {
+    let exe = std::env::current_exe().and_then(|p| p.canonicalize()).ok()?;
+    match detect_channel(&exe) {
+        Channel::NpmGlobal(_, launcher) | Channel::NpmLocal(launcher) => Some(format!("npm i -g {launcher}@latest")),
+        Channel::Homebrew(formula, _) if formula == "horus-rs" => Some("brew install meritt-dev/tap/horus".into()),
+        Channel::Homebrew(formula, _) => Some(format!("brew upgrade {formula}")),
+        Channel::Standalone => None,
+    }
 }
 
 /// npm/Homebrew: upgrade through the package manager, then run the NEW binary's `horus update`
@@ -104,6 +119,13 @@ fn update_via_package_manager(channel: &Channel) -> u8 {
             let mut c = Command::new("npm");
             c.args(["install", "-g", "--prefix"]).arg(prefix).arg(format!("{launcher}@latest"));
             (c, std::env::current_exe().and_then(|p| p.canonicalize()).ok())
+        }
+        // Pre-0.24 side-by-side formula: the binary is the `horus` formula now.
+        Channel::Homebrew(formula, opt_bin) if formula == "horus-rs" => {
+            let mut c = Command::new("brew");
+            c.args(["install", "meritt-dev/tap/horus"]);
+            // <prefix>/opt/horus-rs/bin/horus-rs → <prefix>/opt/horus/bin/horus
+            (c, opt_bin.ancestors().nth(3).map(|opt| opt.join("horus").join("bin").join(BIN)))
         }
         Channel::Homebrew(formula, opt_bin) => {
             let mut c = Command::new("brew");

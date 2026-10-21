@@ -9,7 +9,7 @@ description = "Local-first, source-aware production-incident investigation engin
 homepage = "https://horus.sh"
 
 [[bin]]
-name = "horus-rs"
+name = "horus"
 path = "src/main.rs"
 
 # Release archives: `horus` + the source backend wheel (staged here by the release workflow,

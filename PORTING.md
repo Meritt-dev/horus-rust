@@ -44,7 +44,7 @@ stay untouched. `CARGO_BUILD_JOBS=4` keeps peak memory low on an 8 GB Docker VM.
 **macOS arm64 (host)**
 
 ```sh
-HORUS_VERSION=0.23.0 cargo build --release -p horus-cli      # → target/release/horus-rs
+HORUS_VERSION=0.24.0 cargo build --release -p horus-cli      # → target/release/horus
 ```
 
 **Linux arm64 (native on Apple Silicon Docker, ~5 min cold)**
@@ -53,9 +53,9 @@ HORUS_VERSION=0.23.0 cargo build --release -p horus-cli      # → target/releas
 docker volume create horus-rust-linux-target; docker volume create horus-rust-cargo-registry
 docker run --rm --platform linux/arm64 \
   -v "$PWD":/src:ro -v horus-rust-linux-target:/target -v horus-rust-cargo-registry:/usr/local/cargo/registry \
-  -e CARGO_TARGET_DIR=/target -e CARGO_BUILD_JOBS=4 -e HORUS_VERSION=0.23.0 -w /src \
+  -e CARGO_TARGET_DIR=/target -e CARGO_BUILD_JOBS=4 -e HORUS_VERSION=0.24.0 -w /src \
   rust:1.96.0-bookworm cargo build --release --locked -p horus-cli
-# binary: /target/release/horus-rs in the volume
+# binary: /target/release/horus in the volume
 ```
 
 **Linux amd64 (cross-compiled with Debian's gcc cross toolchain, ~5 min cold; no emulation needed)**
@@ -63,17 +63,17 @@ docker run --rm --platform linux/arm64 \
 ```sh
 docker run --rm --platform linux/arm64 \
   -v "$PWD":/src:ro -v horus-rust-linux-target:/target -v horus-rust-cargo-registry:/usr/local/cargo/registry \
-  -e CARGO_TARGET_DIR=/target -e CARGO_BUILD_JOBS=4 -e HORUS_VERSION=0.23.0 \
+  -e CARGO_TARGET_DIR=/target -e CARGO_BUILD_JOBS=4 -e HORUS_VERSION=0.24.0 \
   -e CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc \
   -e CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc -e AR_x86_64_unknown_linux_gnu=x86_64-linux-gnu-ar \
   -w /src rust:1.96.0-bookworm sh -c '
     apt-get -qq update && apt-get -qq install -y gcc-x86-64-linux-gnu libc6-dev-amd64-cross &&
     rustup target add x86_64-unknown-linux-gnu &&
     cargo build --release --locked -p horus-cli --target x86_64-unknown-linux-gnu'
-# binary: /target/x86_64-unknown-linux-gnu/release/horus-rs in the volume
+# binary: /target/x86_64-unknown-linux-gnu/release/horus in the volume
 ```
 
-Copy a binary out: `docker run --rm -v horus-rust-linux-target:/target -v "$PWD/out":/out debian:bookworm-slim cp /target/release/horus-rs /out/`.
+Copy a binary out: `docker run --rm -v horus-rust-linux-target:/target -v "$PWD/out":/out debian:bookworm-slim cp /target/release/horus /out/`.
 
 **Linux runtime requirements:** glibc ≥ 2.34 (dynamically links only `libc`, `libm`, `libgcc_s`; TLS is
 rustls and SQLite is bundled). Install `procps` for `ps`/`kill`, which host and worker process management

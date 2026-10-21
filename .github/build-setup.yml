@@ -9,9 +9,10 @@
   uses: actions/checkout@v6
   with:
     repository: Meritt-dev/horus
-    # Meritt-dev/horus is public. Same tag as this release (v0.23.0 → bcdc5f0, the commit npm
-    # @merittdev/horus@0.23.0 was published from) unless repo variable HORUS_SOURCE_REF is set.
-    ref: ${{ vars.HORUS_SOURCE_REF || github.ref_name }}
+    # Meritt-dev/horus is public; no token. The backend is versioned independently of this CLI:
+    # repo variable HORUS_SOURCE_REF picks the ref, else v0.23.0 (bcdc5f0, the commit npm
+    # @merittdev/horus@0.23.0 was published from). The wheel is restamped to HORUS_VERSION below.
+    ref: ${{ vars.HORUS_SOURCE_REF || 'v0.23.0' }}
     path: _horus-src
 - name: Install uv
   uses: astral-sh/setup-uv@v5

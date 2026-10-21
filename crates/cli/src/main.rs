@@ -94,6 +94,7 @@ async fn main() -> ExitCode {
     if !matches!(leaf, "update" | "service" | "watch") {
         lib::update_notifier::maybe_notify_update();
     }
+    commands::db::maybe_hint_migrate_from_ts(&path, &raw_argv);
     let telemetry = lib::telemetry::command_hooks::command_invoked(&raw_argv, path.join(" "));
 
     let result = commands::dispatch(&cli).await;

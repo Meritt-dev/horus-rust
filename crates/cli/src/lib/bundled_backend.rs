@@ -13,12 +13,13 @@ use crate::lib::format::{dim, green, yellow};
 
 /// The wheel bundled next to the CLI executable, or None when absent. (TS: next to
 /// `dist/index.cjs`; the Rust binary is the bundle entry point.) The executable path is
-/// resolved first (Homebrew's `bin/horus-rs` is a symlink into the Cellar), and the Homebrew
-/// formula (named like the binary) installs the wheel to `<keg>/share/horus-rs/` rather than
-/// beside the binary.
+/// resolved first (Homebrew's `bin/horus` is a symlink into the Cellar), and the Homebrew
+/// formula (named like the binary: `horus`, or the pre-0.24 `horus-rs`) installs the wheel to
+/// `<keg>/share/<name>/` rather than beside the binary.
 pub fn resolve_bundled_wheel() -> Option<PathBuf> {
-    let dir = std::env::current_exe().ok()?.canonicalize().ok()?.parent()?.to_path_buf();
-    let pkgshare = format!("../share/{}/horus_source.whl", env!("CARGO_BIN_NAME"));
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let dir = exe.parent()?.to_path_buf();
+    let pkgshare = format!("../share/{}/horus_source.whl", exe.file_name()?.to_string_lossy());
     [dir.join("horus_source.whl"), dir.join(pkgshare)]
         .into_iter()
         .find(|w| w.exists())

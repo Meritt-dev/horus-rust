@@ -16,13 +16,15 @@ targets = [
 unix-archive = ".tar.gz"
 checksum = "sha256"
 tap = "Meritt-dev/homebrew-tap"
-formula = "horus-rs"
+formula = "horus"
 publish-jobs = ["./publish-homebrew", "./publish-npm"]
 post-announce-jobs = ["./notarize-macos"]
 # Builds horus_source.whl from Meritt-dev/horus and stamps HORUS_VERSION before `dist build`.
 github-build-setup = "../build-setup.yml"
-# Codesigns macOS binaries when CODESIGN_* secrets are set; skipped otherwise.
-macos-sign = true
+# Off until the Apple certificate secrets exist: dist 0.33 does NOT skip signing when
+# CODESIGN_* are empty, it fails the macOS builds. Set to true once CODESIGN_CERTIFICATE,
+# CODESIGN_CERTIFICATE_PASSWORD and CODESIGN_IDENTITY are configured (docs/RELEASE.md).
+macos-sign = false
 install-path = ["$XDG_BIN_HOME/", "$XDG_DATA_HOME/../bin", "~/.local/bin"]
 install-updater = false
 pr-run-mode = "plan"

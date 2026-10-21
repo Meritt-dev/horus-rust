@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Turn dist's release archives into npm packages: one per platform (bin/horus-rs +
+// Turn dist's release archives into npm packages: one per platform (bin/horus +
 // bin/horus_source.whl, with os/cpu set) and one launcher with them as optionalDependencies.
 //
 //   node release/npm/build.mjs --archives <dir with horus-cli-*.tar.gz> --version 0.23.0 --out <dir>
 //
-// The npm name is decided HERE (or by HORUS_NPM_NAME). '@merittdev/horus-rs' ships beside the
-// TS '@merittdev/horus'; the binary is `horus-rs` so the two never shadow each other.
+// The npm name is decided HERE (or by HORUS_NPM_NAME). From 0.24.0 the Rust build IS
+// '@merittdev/horus' (it replaced the TS package, which published up to 0.23.0).
 // See docs/RELEASE.md.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -13,8 +13,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
-const NPM_NAME = process.env.HORUS_NPM_NAME || '@merittdev/horus-rs';
-const BIN = 'horus-rs';
+const NPM_NAME = process.env.HORUS_NPM_NAME || '@merittdev/horus';
+const BIN = 'horus';
 
 // npm platform suffix (process.platform-process.arch) → dist target triple.
 const PLATFORMS = {

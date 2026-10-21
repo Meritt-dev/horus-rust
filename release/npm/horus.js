@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Launcher for the native Horus binary (esbuild/biome pattern). npm installs exactly one
-// platform package through optionalDependencies; this shim runs its `bin/horus-rs`, inheriting
+// platform package through optionalDependencies; this shim runs its `bin/horus`, inheriting
 // stdio and forwarding signals and the exit status. No postinstall, no download.
 'use strict';
 const { spawn } = require('node:child_process');
@@ -12,11 +12,11 @@ const pkg = `${launcher}-${process.platform}-${process.arch}`;
 
 let binary;
 try {
-  binary = path.join(path.dirname(require.resolve(`${pkg}/package.json`)), 'bin', 'horus-rs');
+  binary = path.join(path.dirname(require.resolve(`${pkg}/package.json`)), 'bin', 'horus');
 } catch {
   const supported = Object.keys(require('../package.json').optionalDependencies || {}).join(', ');
   console.error(
-    `horus-rs: no native binary for ${process.platform}-${process.arch} (expected the optional package ${pkg}).\n` +
+    `horus: no native binary for ${process.platform}-${process.arch} (expected the optional package ${pkg}).\n` +
       `Supported: ${supported}.\n` +
       'If you installed with --omit=optional or --no-optional, reinstall without it.',
   );
@@ -35,7 +35,7 @@ const forward = (signal) => child.kill(signal);
 const signals = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT'];
 for (const s of signals) process.on(s, forward);
 child.on('error', (err) => {
-  console.error(`horus-rs: failed to start ${binary}: ${err.message}`);
+  console.error(`horus: failed to start ${binary}: ${err.message}`);
   process.exit(1);
 });
 child.on('exit', (code, signal) => {

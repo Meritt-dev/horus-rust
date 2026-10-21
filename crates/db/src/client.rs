@@ -436,7 +436,7 @@ pub fn acquire_db_lock(data_path: &Path, timeout: Duration) -> Result<DbLock> {
 // One-time import from a legacy user-run Postgres (`importFromPostgres`)
 // ---------------------------------------------------------------------------
 
-pub use pg_import::{import_from_postgres, IMPORT_TABLES};
+pub use pg_import::{import_from_postgres, import_tables, IMPORT_TABLES, MIGRATE_TABLES};
 
 mod pg_import {
     use super::DbHandle;
@@ -462,6 +462,32 @@ mod pg_import {
         "memory_item",
         "memory_link",
         "memory_audit",
+    ];
+
+    /// Every table of the embedded schema, in FK-safe order: what `horus db migrate-from-ts`
+    /// copies from a TS PGlite store (same drizzle schema), so nothing a TS user had is left
+    /// behind — registry, queue topology, caches, memory sync state and watch jobs included.
+    pub const MIGRATE_TABLES: &[&str] = &[
+        "projects",
+        "repositories",
+        "investigations",
+        "evidence",
+        "findings",
+        "hypotheses",
+        "incident_memory",
+        "outcome_label",
+        "memory_item",
+        "memory_link",
+        "memory_audit",
+        "queue_edges",
+        "provider_cache",
+        "memory_sync_state",
+        "memory_sync_replica",
+        "memory_sync_outbox",
+        "memory_sync_pull_page",
+        "watch_state",
+        "watch_job",
+        "watch_event",
     ];
 
     /// Rows inserted per batch — keeps a large export from exceeding the bind-parameter limit.
@@ -635,48 +661,112 @@ mod pg_import {
     ///
     /// Returns the number of source rows processed per table, in [`IMPORT_TABLES`] order.
     pub async fn import_from_postgres(source_url: &str, db: &DbHandle) -> Result<Vec<(String, usize)>> {
+        Ok(import_tables(source_url, db, IMPORT_TABLES, false).await?.into_iter().map(|(t, n, _)| (t, n)).collect())
+    }
+
+    /// [`import_from_postgres`] over an explicit table list. Upserts on each table's primary key
+    /// (not every table is keyed by `id`). With `verbatim`, the memory-sync triggers are held
+    /// off for the copy (the `horus.sync_pull` flag a sync pull uses), so `sync_generation`
+    /// values arrive exactly as the source had them instead of being bumped by the inserts,
+    /// and an unreachable source or unreadable table is an error rather than "0 rows". Source
+    /// rows whose parent row is missing (a PGlite store can hold them despite its FK
+    /// constraints) cannot live in SQLite with foreign keys on: they are dropped and counted.
+    ///
+    /// Returns `(table, source rows, dropped orphans)` per table, in `tables` order.
+    pub async fn import_tables(
+        source_url: &str,
+        db: &DbHandle,
+        tables: &[&str],
+        verbatim: bool,
+    ) -> Result<Vec<(String, usize, usize)>> {
         // Guardrail (HOR-298): never open a direct connection to the Horus Cloud database —
         // cloud state is reached through the /v1 REST API, so importing from it is refused.
         assert_local_database_url(source_url)?;
         // postgres-js connects lazily, so a connection failure surfaces per table query.
-        let source = connect(source_url).await.ok();
-        let mut counts: Vec<(String, usize)> = Vec::new();
-        for &table in IMPORT_TABLES {
-            counts.push((table.to_string(), 0));
+        let source = match connect(source_url).await {
+            Ok(s) => Some(s),
+            // A migration must not report "0 rows" for a source it never reached.
+            Err(e) if verbatim => return Err(e.context("connect to the source database")),
+            Err(_) => None,
+        };
+        let mut counts: Vec<(String, usize, usize)> = Vec::new();
+        for &table in tables {
+            counts.push((table.to_string(), 0, 0));
             let Some(source) = source.as_ref() else { continue };
             let t = table.to_string();
-            let columns: Vec<String> = db
+            // (name, primary-key position) per column; position 0 = not part of the key.
+            let info: Vec<(String, i64)> = db
                 .with_conn(move |c| {
                     let mut stmt = c.prepare(&format!("PRAGMA table_info(\"{t}\")"))?;
-                    let cols = stmt.query_map([], |r| r.get::<_, String>(1))?.collect::<rusqlite::Result<Vec<_>>>()?;
+                    let cols = stmt
+                        .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, i64>(5)?)))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
                     Ok(cols)
                 })
                 .await?;
-            let Some(rows) = read_table(source, table, &columns).await else { continue };
+            let columns: Vec<String> = info.iter().map(|(c, _)| c.clone()).collect();
+            let key: Vec<String> = info.iter().filter(|(_, pk)| *pk > 0).map(|(c, _)| format!("\"{c}\"")).collect();
+            let Some(rows) = read_table(source, table, &columns).await else {
+                if verbatim {
+                    anyhow::bail!("could not read table {table} from the source (schema mismatch?)");
+                }
+                continue;
+            };
             if rows.is_empty() {
                 continue;
             }
             let n = rows.len();
             let t = table.to_string();
-            db.with_conn(move |c| {
+            let dropped = db.with_conn(move |c| {
                 let col_list = columns.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
-                let set = columns
+                let set = info
                     .iter()
-                    .filter(|c| c.as_str() != "id")
-                    .map(|c| format!("\"{c}\" = excluded.\"{c}\""))
+                    .filter(|(_, pk)| *pk == 0)
+                    .map(|(c, _)| format!("\"{c}\" = excluded.\"{c}\""))
                     .collect::<Vec<_>>()
                     .join(", ");
+                let on_conflict = if set.is_empty() {
+                    format!("ON CONFLICT({}) DO NOTHING", key.join(", "))
+                } else {
+                    format!("ON CONFLICT({}) DO UPDATE SET {set}", key.join(", "))
+                };
                 let placeholder = format!("({})", vec!["?"; columns.len()].join(", "));
-                for batch in rows.chunks(IMPORT_CHUNK) {
-                    let values = vec![placeholder.as_str(); batch.len()].join(", ");
-                    let sql = format!("INSERT INTO \"{t}\" ({col_list}) VALUES {values} ON CONFLICT(\"id\") DO UPDATE SET {set}");
-                    c.execute(&sql, rusqlite::params_from_iter(batch.iter().flatten()))?;
+                if verbatim {
+                    c.execute("INSERT OR REPLACE INTO \"__horus_settings\" (key, value) VALUES ('horus.sync_pull', '1')", [])?;
+                    c.execute_batch("PRAGMA foreign_keys = OFF;")?;
                 }
-                Ok(())
+                let copied = (|| -> rusqlite::Result<()> {
+                    for batch in rows.chunks(IMPORT_CHUNK) {
+                        let values = vec![placeholder.as_str(); batch.len()].join(", ");
+                        let sql = format!("INSERT INTO \"{t}\" ({col_list}) VALUES {values} {on_conflict}");
+                        c.execute(&sql, rusqlite::params_from_iter(batch.iter().flatten()))?;
+                    }
+                    Ok(())
+                })();
+                let mut dropped = 0;
+                if verbatim {
+                    if copied.is_ok() {
+                        let orphans: Vec<i64> = c
+                            .prepare(&format!("PRAGMA foreign_key_check(\"{t}\")"))?
+                            .query_map([], |r| r.get::<_, Option<i64>>(1))?
+                            .filter_map(|r| r.ok().flatten())
+                            .collect();
+                        for rowid in &orphans {
+                            c.execute(&format!("DELETE FROM \"{t}\" WHERE rowid = ?1"), [rowid])?;
+                        }
+                        dropped = orphans.len();
+                    }
+                    c.execute_batch("PRAGMA foreign_keys = ON;")?;
+                    c.execute("DELETE FROM \"__horus_settings\" WHERE key = 'horus.sync_pull'", [])?;
+                }
+                copied?;
+                Ok(dropped)
             })
-            .await?;
+            .await
+            .map_err(|e| e.context(format!("import table {table}")))?;
             if let Some(last) = counts.last_mut() {
                 last.1 = n;
+                last.2 = dropped;
             }
         }
         Ok(counts)
