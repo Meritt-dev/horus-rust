@@ -1268,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "horus-ai"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1282,7 +1282,7 @@ dependencies = [
 
 [[package]]
 name = "horus-cli"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1317,7 +1317,7 @@ dependencies = [
 
 [[package]]
 name = "horus-connectors"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1354,7 +1354,7 @@ dependencies = [
 
 [[package]]
 name = "horus-core"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1373,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "horus-db"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "horus-engine"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1418,7 +1418,7 @@ dependencies = [
 
 [[package]]
 name = "horus-eval"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "chrono",
  "horus-db",
@@ -1429,7 +1429,7 @@ dependencies = [
 
 [[package]]
 name = "horus-knowledge"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1444,7 +1444,7 @@ dependencies = [
 
 [[package]]
 name = "horus-stitcher"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "horus-connectors",

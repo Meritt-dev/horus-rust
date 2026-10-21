@@ -300,19 +300,23 @@ pub struct CreateEvidenceBody {
     pub idempotency_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// The cloud `AgentRun` schema carries `startedAt`, not `createdAt`/`repositoryId`, and a nullable
+/// `projectId`. TS types these fields but never reads them (only `id`), so every field but `id`
+/// tolerates absence or null here; requiring them failed each upload with "missing field `createdAt`".
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct AgentRunRecord {
     pub id: String,
     pub investigation_id: String,
-    pub project_id: String,
+    pub project_id: Option<String>,
     pub organization_id: String,
     pub repository_id: Option<String>,
     pub status: String,
     pub cli_version: Option<String>,
     pub summary: Option<String>,
     pub idempotency_key: Option<String>,
-    pub created_at: String,
+    pub started_at: Option<String>,
+    pub created_at: Option<String>,
 }
 
 /// Body for `createAgentRun` / `updateAgentRun` (the update ignores the create-only fields).
