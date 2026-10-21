@@ -1,0 +1,42 @@
+# Custom dist post-announce job (dist-workspace.toml: post-announce-jobs = ["./notarize-macos"]).
+# Submits the released, Developer-ID-signed macOS binaries to Apple notarization. Bare Mach-O
+# binaries cannot be stapled; Gatekeeper finds the ticket online, so the archives (and their
+# checksums) stay unchanged. Skips cleanly unless the signing and notary secrets are all set.
+name: Notarize macOS binaries
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  notarize:
+    runs-on: macos-14
+    env:
+      CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      PLAN: ${{ inputs.plan }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Skip without Apple credentials
+        if: env.CODESIGN_IDENTITY == '' || env.APPLE_ID == '' || env.APPLE_TEAM_ID == '' || env.APPLE_APP_PASSWORD == ''
+        run: echo "::notice::Apple signing/notary secrets are not all set; skipping notarization."
+      - name: Submit darwin binaries to notarytool
+        if: env.CODESIGN_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != ''
+        run: |
+          set -euo pipefail
+          TAG="$(echo "$PLAN" | jq -r '.announcement_tag')"
+          mkdir -p in && cd in
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'horus-cli-*-apple-darwin.tar.gz'
+          for a in horus-cli-*-apple-darwin.tar.gz; do
+            tar -xzf "$a"
+            dir="${a%.tar.gz}"
+            codesign --verify --strict --verbose=2 "$dir/horus"
+            ditto -c -k --keepParent "$dir/horus" "$dir.zip"
+            xcrun notarytool submit "$dir.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" --wait
+          done

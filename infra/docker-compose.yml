@@ -1,0 +1,81 @@
+# Local live systems for the connectors that have no shared environment (Kafka, SQL Server,
+# Postgres, Redis over TLS). Throwaway credentials only; every port binds to 127.0.0.1.
+# Usage: see README.md (./gen-certs.sh, docker compose up -d --wait, ./seed.sh).
+name: horus-infra
+
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    # Settings come from kafka/server.properties (KRaft single node, PLAINTEXT + SASL listeners).
+    volumes:
+      - ./kafka:/mnt/shared/config:ro
+    ports:
+      - "127.0.0.1:19092:19092" # PLAINTEXT
+      - "127.0.0.1:19093:19093" # SASL_PLAINTEXT (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512)
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:19092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  sqlserver:
+    # Azure SQL Edge runs natively on arm64 (mssql/server is amd64-only). It ships without sqlcmd,
+    # so seed.sh uses the mssql-tools image below.
+    image: mcr.microsoft.com/azure-sql-edge:1.0.7
+    environment:
+      ACCEPT_EULA: "1"
+      MSSQL_SA_PASSWORD: "Horus-local-Pass1"
+    ports:
+      - "127.0.0.1:11433:1433"
+
+  sqlcmd:
+    # Client only (amd64 under emulation); used by seed.sh via `docker compose run --rm sqlcmd`.
+    image: mcr.microsoft.com/mssql-tools@sha256:62556500522072535cb3df2bb5965333dded9be47000473e9e0f84118e248642
+    platform: linux/amd64
+    profiles: ["tools"]
+    volumes:
+      - ./seed:/seed:ro
+
+  postgres:
+    image: postgres:16.10-alpine
+    environment:
+      POSTGRES_USER: horus
+      POSTGRES_PASSWORD: horus-local-pass
+      POSTGRES_DB: shop
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - ./seed:/seed:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U horus -d shop"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  redis-tls:
+    image: redis:7.4.5-alpine
+    command:
+      - redis-server
+      - --port
+      - "0"
+      - --tls-port
+      - "6380"
+      - --tls-cert-file
+      - /certs/redis.crt
+      - --tls-key-file
+      - /certs/redis.key
+      - --tls-ca-cert-file
+      - /certs/ca.crt
+      - --tls-auth-clients
+      - "no"
+      - --requirepass
+      - horus-local-pass
+    volumes:
+      - ./certs:/certs:ro
+    ports:
+      - "127.0.0.1:16380:6380"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --tls --cacert /certs/ca.crt -p 6380 -a horus-local-pass --no-auth-warning ping | grep -q PONG"]
+      interval: 3s
+      timeout: 3s
+      retries: 30

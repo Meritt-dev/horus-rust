@@ -1,0 +1,34 @@
+[workspace]
+members = ["cargo:."]
+
+# Release packaging. See docs/RELEASE.md. After editing, run `dist generate`.
+[dist]
+cargo-dist-version = "0.33.0"
+ci = "github"
+installers = ["shell", "homebrew"]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-unknown-linux-musl",
+    "x86_64-unknown-linux-musl",
+]
+# gzip, not xz: `horus update` and cargo-binstall extract with plain `tar xzf`.
+unix-archive = ".tar.gz"
+checksum = "sha256"
+tap = "Meritt-dev/homebrew-tap"
+formula = "horus-rs"
+publish-jobs = ["./publish-homebrew", "./publish-npm"]
+post-announce-jobs = ["./notarize-macos"]
+# Builds horus_source.whl from Meritt-dev/horus and stamps HORUS_VERSION before `dist build`.
+github-build-setup = "../build-setup.yml"
+# Codesigns macOS binaries when CODESIGN_* secrets are set; skipped otherwise.
+macos-sign = true
+install-path = ["$XDG_BIN_HOME/", "$XDG_DATA_HOME/../bin", "~/.local/bin"]
+install-updater = false
+pr-run-mode = "plan"
+
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-14"
+x86_64-apple-darwin = "macos-14"
+aarch64-unknown-linux-musl = "ubuntu-24.04-arm"
+x86_64-unknown-linux-musl = "ubuntu-22.04"

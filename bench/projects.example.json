@@ -1,0 +1,43 @@
+{
+  "tsRoot": "/path/to/horus",
+  "mainProject": "/path/to/your-service",
+  "main": {
+    "sym": "OrderService",
+    "sym2": "OrderController",
+    "area": "orders",
+    "hint": "order sync failures",
+    "hint2": "jobs retrying",
+    "metricsHint": "checkout latency",
+    "question": "how are orders synced"
+  },
+  "acceptance": [
+    {
+      "name": "my-incident",
+      "cwd": "/path/to/your-service",
+      "argv": [
+        "investigate",
+        "<incident hint>",
+        "--json",
+        "--timeout",
+        "180"
+      ],
+      "json": true,
+      "checks": [
+        {
+          "kind": "contains",
+          "value": "ExpectedSymbol",
+          "ci": true
+        }
+      ]
+    }
+  ],
+  "projects": {
+    "/path/to/another-repo": {
+      "sym": "SomeService",
+      "sym2": "SomeController",
+      "area": "billing",
+      "hint": "billing webhook failures",
+      "runtime": false
+    }
+  }
+}

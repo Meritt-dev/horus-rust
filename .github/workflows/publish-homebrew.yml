@@ -1,0 +1,50 @@
+# Custom dist publish job (dist-workspace.toml: publish-jobs = ["./publish-homebrew"]).
+# Pushes the generated horus-rs.rb formula to Meritt-dev/homebrew-tap using a deploy key scoped to
+# that one repo (secret HOMEBREW_TAP_DEPLOY_KEY), instead of a personal access token.
+# Skips cleanly when the secret is absent.
+name: Publish Homebrew formula
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  publish-homebrew:
+    runs-on: ubuntu-22.04
+    env:
+      DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+      PLAN: ${{ inputs.plan }}
+    steps:
+      - name: Skip without HOMEBREW_TAP_DEPLOY_KEY
+        if: env.DEPLOY_KEY == ''
+        run: echo "::notice::HOMEBREW_TAP_DEPLOY_KEY is not set; skipping Homebrew publish."
+      - uses: actions/checkout@v6
+        if: env.DEPLOY_KEY != ''
+        with:
+          repository: Meritt-dev/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          persist-credentials: true
+      - name: Fetch formula
+        if: env.DEPLOY_KEY != ''
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-*
+          path: Formula/
+          merge-multiple: true
+      - name: Commit formula
+        if: env.DEPLOY_KEY != ''
+        run: |
+          git config --global user.name "horus-rs release"
+          git config --global user.email "noreply@github.com"
+          # Keep only formula files from the artifacts; everything else is release archives.
+          find Formula -maxdepth 1 -type f ! -name '*.rb' -delete
+          for release in $(echo "$PLAN" | jq --compact-output '.releases[] | select([.artifacts[] | endswith(".rb")] | any)'); do
+            filename=$(echo "$release" | jq '.artifacts[] | select(endswith(".rb"))' --raw-output)
+            version=$(echo "$release" | jq .app_version --raw-output)
+            git add "Formula/${filename}"
+            git commit -m "${filename%.rb} ${version}" || echo "no change for ${filename}"
+          done
+          git push

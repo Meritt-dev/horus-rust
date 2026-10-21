@@ -1,0 +1,70 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.23.0"
+edition = "2021"
+license = "MIT"
+# GitHub repo that hosts the Rust release archives. dist, cargo-binstall and `horus update`
+# (via CARGO_PKG_REPOSITORY) all read it from here. Open decision: see docs/RELEASE.md.
+repository = "https://github.com/Meritt-dev/horus-rust"
+publish = false
+
+[workspace.dependencies]
+horus-core = { path = "crates/core" }
+horus-connectors = { path = "crates/connectors" }
+horus-db = { path = "crates/db" }
+horus-stitcher = { path = "crates/stitcher" }
+horus-engine = { path = "crates/engine" }
+horus-ai = { path = "crates/ai" }
+horus-knowledge = { path = "crates/knowledge" }
+horus-eval = { path = "crates/eval" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+clap = { version = "4", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+aes-gcm = "0.10"
+scrypt = "0.11"
+base64 = "0.22"
+hex = "0.4"
+glob = "0.3"
+walkdir = "2"
+dirs = "5"
+indexmap = { version = "2", features = ["serde"] }
+futures = "0.3"
+async-trait = "0.1"
+url = "2"
+mongodb = "3"
+redis = { version = "1", default-features = false, features = ["tokio-comp", "tokio-rustls-comp"] }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
+tokio-postgres-rustls = { version = "0.14", features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+tiberius = { version = "0.13", default-features = false, features = ["rustls", "tds73", "chrono"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+kafka-protocol = { version = "0.18", default-features = false, features = ["client", "broker"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+hmac = "0.12"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+rand = "0.8"
+bytes = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# The profile that dist builds release archives with.
+[profile.dist]
+inherits = "release"

@@ -1,0 +1,18 @@
+[package]
+name = "horus-stitcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+horus-core = { workspace = true }
+horus-connectors = { workspace = true }
+horus-db = { workspace = true }
+anyhow = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }

@@ -1,0 +1,56 @@
+# Custom dist publish job (dist-workspace.toml: publish-jobs = ["./publish-npm"]).
+# Turns the release archives into npm packages (release/npm/build.mjs) and publishes them.
+# Skips cleanly when the NPM_TOKEN secret is absent.
+name: Publish npm packages
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  publish-npm:
+    runs-on: ubuntu-22.04
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      PLAN: ${{ inputs.plan }}
+    steps:
+      - name: Skip without NPM_TOKEN
+        if: env.NPM_TOKEN == ''
+        run: echo "::notice::NPM_TOKEN is not set; skipping npm publish."
+      - uses: actions/checkout@v6
+        if: env.NPM_TOKEN != ''
+      - uses: actions/setup-node@v6
+        if: env.NPM_TOKEN != ''
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+      - name: Fetch release archives
+        if: env.NPM_TOKEN != ''
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-*
+          path: archives/
+          merge-multiple: true
+      - name: Build npm packages
+        if: env.NPM_TOKEN != ''
+        run: |
+          VERSION="$(echo "$PLAN" | jq -r '.announcement_tag')"
+          node release/npm/build.mjs --archives archives --version "$VERSION" --out npm-out > npm-dirs.txt
+          cat npm-dirs.txt
+      - name: Publish (platform packages first, launcher last; already-published versions are skipped)
+        if: env.NPM_TOKEN != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          while read -r dir; do
+            name="$(node -p "require('./$dir/package.json').name")"
+            version="$(node -p "require('./$dir/package.json').version")"
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "${name}@${version} is already on npm; skipping."
+            else
+              npm publish "./$dir" --access public
+            fi
+          done < npm-dirs.txt

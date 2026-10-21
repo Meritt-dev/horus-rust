@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+.DS_Store
+/bench/out
+target-bench/
+/infra/certs/
+
+# Staged by the release build (.github/build-setup.yml)
+/crates/cli/horus_source.whl
+/dist-out
+bench/projects.local.json
