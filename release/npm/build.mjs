@@ -45,8 +45,10 @@ const common = {
   version,
   description: 'Local-first, source-aware production-incident investigation engine',
   license: 'MIT',
+  keywords: ['incident-investigation', 'observability', 'sre', 'debugging', 'cli'],
   homepage: 'https://horus.sh',
-  repository: { type: 'git', url: 'https://github.com/meritt-dev/horus' },
+  repository: { type: 'git', url: 'https://github.com/Meritt-dev/horus-rust' },
+  bugs: { url: 'https://github.com/Meritt-dev/horus-rust/issues' },
 };
 const write = (dir, json) => {
   fs.mkdirSync(dir, { recursive: true });
@@ -85,6 +87,10 @@ for (const [suffix, target] of Object.entries(PLATFORMS)) {
     preferUnplugged: true,
     publishConfig: { access: 'public' },
   });
+  fs.writeFileSync(
+    path.join(dir, 'README.md'),
+    `# ${NPM_NAME}-${suffix}\n\nThe \`${BIN}\` binary for ${platform}/${cpu}, installed automatically by [\`${NPM_NAME}\`](https://www.npmjs.com/package/${NPM_NAME}). Install that package instead.\n`,
+  );
   built.push(dir);
 }
 
@@ -101,6 +107,8 @@ write(launcher, {
   optionalDependencies: Object.fromEntries(Object.keys(PLATFORMS).map((s) => [`${NPM_NAME}-${s}`, version])),
   publishConfig: { access: 'public' },
 });
+// npm shows the package README on its page; ship the project README.
+fs.copyFileSync(path.join(here, '..', '..', 'README.md'), path.join(launcher, 'README.md'));
 
 // Publish order: platform packages first, the launcher last.
 console.log([...built, launcher].join('\n'));
