@@ -98,7 +98,7 @@ Secrets and variables in the release repo (Settings → Secrets and variables �
 | Name | Kind | Needed for | When absent |
 | ---- | ---- | ---------- | ----------- |
 | `HOMEBREW_TAP_DEPLOY_KEY` | secret | write deploy key on `Meritt-dev/homebrew-tap` | the Homebrew job prints a notice and skips |
-| `NPM_TOKEN` | secret | npm automation token with publish rights on `@merittdev` | the npm job prints a notice and skips |
+| npm trusted publisher | npm package setting | each of `@merittdev/horus` and the four `@merittdev/horus-<platform>` packages trusts GitHub Actions `Meritt-dev/horus-rust` → `release.yml` (no token, no OTP; the account enforces 2FA on publishing, so tokens get `EOTP`) | the npm job fails with `ENEEDAUTH`/`E404`; publish the release by hand with `npm publish <tgz>` (2FA) and add the trust |
 | `HORUS_SOURCE_REF` | variable | `Meritt-dev/horus` ref the wheel is built from | defaults to `v0.23.0` |
 | `CODESIGN_CERTIFICATE`, `CODESIGN_CERTIFICATE_PASSWORD`, `CODESIGN_IDENTITY` | secrets | Developer ID signing (base64 `.p12`, its password, e.g. `Developer ID Application: Meritt Dev (TEAMID)`) | unused while `macos-sign = false` |
 | `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | secrets | `notarytool` (app-specific password) | the notarize job prints a notice and skips (it also needs `CODESIGN_IDENTITY`) |
@@ -189,3 +189,17 @@ installed (see PORTING.md for the Docker volume layout).
   dependency order: core → ai, connectors, db, knowledge → stitcher, engine → eval → cli. A
   crates.io source build still has no wheel (see "No wheel" above).
 - **Notarization.** Wired but unproven until a Developer ID certificate exists.
+
+## npm trusted publishing (one-time, per package)
+
+`@merittdev` requires 2FA on publishing, so CI can't publish with a token. Instead each package
+trusts this repo's release workflow (needs npm ≥ 11.10 for `npm trust`; run with 2FA):
+
+```sh
+for p in @merittdev/horus @merittdev/horus-darwin-arm64 @merittdev/horus-darwin-x64 \
+         @merittdev/horus-linux-arm64 @merittdev/horus-linux-x64; do
+  npx -y npm@latest trust github "$p" --file release.yml --repo Meritt-dev/horus-rust --allow-publish -y
+done
+```
+
+A new platform package (e.g. another target) has to be published once by hand before it can be trusted.
