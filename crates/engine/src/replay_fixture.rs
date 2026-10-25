@@ -16,8 +16,8 @@ pub const INCIDENT_001_EXPECTED_OWNER: &str = "@horus/connectors-team";
 pub static INCIDENT_001_FIXTURE: LazyLock<InvestigationReport> = LazyLock::new(|| {
     serde_json::from_value(json!({
         "id": "incident-001-fixture",
-        "input": { "hint": "BullMQ workers stalling after deploy", "service": "leadcall-api" },
-        "summary": "BullMQ workers stalled in leadcall-api after a worker concurrency increase exhausted the Redis connection pool.",
+        "input": { "hint": "BullMQ workers stalling after deploy", "service": "checkout-api" },
+        "summary": "BullMQ workers stalled in checkout-api after a worker concurrency increase exhausted the Redis connection pool.",
         "seeds": [
             { "id": "sym-001", "name": "BullMQWorkerConfig", "filePath": "packages/connectors/src/bullmq/worker.ts" }
         ],
@@ -47,11 +47,11 @@ pub static INCIDENT_001_FIXTURE: LazyLock<InvestigationReport> = LazyLock::new(|
                 "payload": {
                     "message": "Job id=42 stalled after 30000ms",
                     "level": "error",
-                    "service": "leadcall-api",
+                    "service": "checkout-api",
                     "eventCode": "WORKER_STALLED"
                 },
                 "links": { "traceId": "trace-bulkstall-001" },
-                "provenance": { "query": "es:leadcall-api-prod-* level>=error stall", "collectedAt": "2026-06-15T10:01:00.000Z" },
+                "provenance": { "query": "es:checkout-api-prod-* level>=error stall", "collectedAt": "2026-06-15T10:01:00.000Z" },
                 "priority": "critical"
             },
             {
@@ -81,7 +81,7 @@ pub static INCIDENT_001_FIXTURE: LazyLock<InvestigationReport> = LazyLock::new(|
         },
         "findings": [
             { "kind": "correlation", "title": "Concurrency bump correlates with stall onset", "confidence": 0.88, "evidenceIds": ["ev-001-commit", "ev-002-log"] },
-            { "kind": "observation", "title": "Stalls confined to leadcall-api workers", "confidence": 0.95, "evidenceIds": ["ev-002-log"] },
+            { "kind": "observation", "title": "Stalls confined to checkout-api workers", "confidence": 0.95, "evidenceIds": ["ev-002-log"] },
             { "kind": "observation", "title": "Changed file is owned by connectors team", "confidence": 0.90, "evidenceIds": ["ev-003-symbol"] }
         ],
         "suspectedCauses": [

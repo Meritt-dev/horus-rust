@@ -111,7 +111,7 @@ pub struct IndexOptions {
     /// Speed hint, used with --changed (accepted for parity; TS reads it nowhere either).
     #[allow(dead_code)]
     pub fast: bool,
-    /// Import a Maison Safqa knowledge-base JSON instead of deriving from source.
+    /// Import an MCP knowledge-base JSON instead of deriving from source.
     pub import_kb: Option<String>,
     /// Force a FULL source re-analysis: stop the host, remove `.horus/source`, rebuild.
     pub reindex: bool,

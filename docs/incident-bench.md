@@ -82,7 +82,7 @@ truth defined at authoring time and precomputed hint vectors. Generated data; no
 
 ## Current reference results
 
-Horus startup recall, October 2026. The public-track rows are reproduced exactly by the runner
+Horus startup recall as shipped in v0.24.3 (October 2026). The public-track rows are reproduced exactly by the runner
 above; the real-codebase row comes from held-out label sets that are not published.
 
 | Set                                                                             | Old word-overlap rule | Shipped recall          | Shipped, keyword-only fallback |

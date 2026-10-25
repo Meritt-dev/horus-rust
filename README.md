@@ -7,11 +7,17 @@ It traces a production symptom through the code (via the source-intelligence bac
 - queues
 - databases
 - error trackers
-- Horus Cloud memory
+- past incidents in local memory (synced with Horus Cloud when the repo is linked)
 
 It then ranks the likely causes and states its confidence plainly.
 
 It is a command-for-command port of the TypeScript `horus` 0.23.0 ([Meritt-dev/horus](https://github.com/Meritt-dev/horus)): same commands, flags, help text, output and exit codes, now as a single native binary.
+
+New in 0.24.3:
+- **Hybrid startup recall.** An investigation opens with matching past incidents, scored by exact code-shaped terms plus local embedding similarity against every hint an incident was seen under. `HORUS_STARTUP_RECALL=off` disables it.
+- **Past incidents in this code.** `horus changes` and `horus what-changed` list earlier investigations whose top suspect methods the change modifies or removes (`relatedIncidents` in JSON). Context, not a gate.
+- **IncidentBench**, an open benchmark for startup recall: [docs/incident-bench.md](docs/incident-bench.md).
+- Investigations record the calling agent session from `HORUS_AGENT_SESSION` or `CLAUDE_CODE_SESSION_ID`.
 
 ## Install
 
@@ -56,7 +62,7 @@ We ran side-by-side benchmarks against 12 real repositories ([docs/BENCHMARK.md]
 - **Startup:** 5 ms vs 158 ms cold start.
 - **Memory:** 10 MB vs 153 MB idle; 140–175 MB vs about 1 GB for a full investigation.
 - **Speed:** 2.5–11.8× faster per project.
-- **Output parity:** 98–100% mean match.
+- **Output parity:** 98–100% mean match on the 11 smaller repos; 66/76 identical cases on the main project (the rest differ only by local history, live data or clock).
 
 The intended differences are listed in [DIVERGENCES.md](DIVERGENCES.md). The main ones:
 - **Local database.** History lives in `~/.horus/horus-rust.db` (SQLite), not the TS CLI's PGlite `~/.horus/horus.db`; `horus db migrate-from-ts` copies it over. Horus Cloud memory syncs into both.

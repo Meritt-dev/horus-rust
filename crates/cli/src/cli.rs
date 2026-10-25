@@ -353,7 +353,7 @@ pub struct InitArgs {
     /// force a full source re-analysis: stop the host, wipe .horus/source, rebuild (purges stale graph edges)
     #[arg(long)]
     pub reindex: bool,
-    /// import a knowledge-base JSON (e.g. Maison Safqa MCP) as the knowledge source
+    /// import a knowledge-base JSON (e.g. an MCP knowledge-base export) as the knowledge source
     #[arg(long, value_name = "path")]
     pub import_kb: Option<String>,
 }
@@ -1183,7 +1183,7 @@ pub struct InvestigateArgs {
     /// overall investigation deadline in seconds (default 120)
     #[arg(long, value_name = "sec")]
     pub timeout: Option<String>,
-    /// service name to scope runtime logs, e.g. leadcall-api-prod
+    /// service name to scope runtime logs, e.g. checkout-api-prod
     #[arg(long, value_name = "name")]
     pub service: Option<String>,
     /// output JSON (alias for --format json)
@@ -1215,7 +1215,7 @@ pub struct PacketArgs {
     /// resolve the seed only from symbols under this path (e.g. packages/core)
     #[arg(long, value_name = "path")]
     pub scope: Option<String>,
-    /// service name to scope runtime logs, e.g. leadcall-api-prod
+    /// service name to scope runtime logs, e.g. checkout-api-prod
     #[arg(long, value_name = "name")]
     pub service: Option<String>,
     /// git ref/range for the change window (e.g. HEAD~5)

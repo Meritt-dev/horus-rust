@@ -51,14 +51,14 @@ pub static FIXTURE_INPUT: LazyLock<NarrativeInput> = LazyLock::new(|| NarrativeI
             id: s("ev-log-001"),
             kind: s("log"),
             title: s("BullMQ worker stalled: job exceeded lockDuration"),
-            service: Some(s("leadcall-api")),
+            service: Some(s("checkout-api")),
             excerpt: Some(s("Job id=42 stalled after 30000ms")),
         },
         NarrativeEvidenceItem {
             id: s("ev-metric-001"),
             kind: s("metric"),
             title: s("Queue depth spiked to 1 200 jobs"),
-            service: Some(s("leadcall-api")),
+            service: Some(s("checkout-api")),
             excerpt: None,
         },
         NarrativeEvidenceItem {
@@ -69,14 +69,14 @@ pub static FIXTURE_INPUT: LazyLock<NarrativeInput> = LazyLock::new(|| NarrativeI
             excerpt: None,
         },
     ],
-    known_services: ids(&["leadcall-api", "zoho-sync"]),
+    known_services: ids(&["checkout-api", "zoho-sync"]),
     suspected_causes: vec![NarrativeCauseItem {
         label: s("Redis connection pool exhausted under high concurrency"),
         score: 0.81,
         evidence_ids: ids(&["ev-log-001", "ev-commit-001"]),
     }],
     deterministic_summary: s(
-        "BullMQ workers stalled in leadcall-api after a concurrency increase caused Redis pool exhaustion.",
+        "BullMQ workers stalled in checkout-api after a concurrency increase caused Redis pool exhaustion.",
     ),
     findings: vec![
         NarrativeFinding { title: s("Concurrency bump correlates with stall onset"), evidence_ids: ids(&["ev-commit-001"]) },
@@ -112,7 +112,7 @@ pub static FIXTURE_INPUT: LazyLock<NarrativeInput> = LazyLock::new(|| NarrativeI
 /// validate_narrative(&FIXTURE_VALID_OUTPUT, &FIXTURE_INPUT) must return valid.
 pub static FIXTURE_VALID_OUTPUT: LazyLock<NarrativeOutput> = LazyLock::new(|| {
     let mut out = base_output(
-        "BullMQ job workers began stalling across the leadcall-api service shortly after a concurrency increase was deployed.",
+        "BullMQ job workers began stalling across the checkout-api service shortly after a concurrency increase was deployed.",
         "Raising worker concurrency from 2 to 10 saturated the Redis connection pool. Each stalled worker held an open connection and never released it, causing subsequent workers to time out waiting for a free slot.",
         &[
             "Roll back worker concurrency to 2 and confirm stall rate drops",
@@ -126,7 +126,7 @@ pub static FIXTURE_VALID_OUTPUT: LazyLock<NarrativeOutput> = LazyLock::new(|| {
         ],
         0.68,
     );
-    out.mentioned_services = Some(ids(&["leadcall-api"]));
+    out.mentioned_services = Some(ids(&["checkout-api"]));
     out.hypothesis_judgments = Some(vec![
         AIHypothesisJudgment {
             hypothesis_id: s("hyp-worker-slowdown"),
@@ -200,6 +200,6 @@ pub static FIXTURE_HALLUCINATED_SERVICE: LazyLock<NarrativeOutput> = LazyLock::n
         vec![cite("ev-log-001", None)],
         0.60,
     );
-    out.mentioned_services = Some(ids(&["leadcall-api", "invented-service-xyz"]));
+    out.mentioned_services = Some(ids(&["checkout-api", "invented-service-xyz"]));
     out
 });
