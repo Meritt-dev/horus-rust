@@ -15,7 +15,9 @@ use crate::lib::cloud::api::ChangeReportBody;
 use crate::lib::cloud::context_store::{is_cloud_active, read_cloud_config};
 use crate::lib::cloud::session::{authed_client, repo_root_or_cwd};
 use crate::lib::engine_code::fail;
+use crate::lib::cloud::investigation_sync::redact_cloud_value;
 use crate::lib::engine_code::{create_code, load_config, resolve_env};
+use crate::lib::related_incidents::related_incidents_for;
 use crate::lib::format::{dim, yellow};
 use horus_engine::what_changed::WhatChangedReport;
 use serde_json::{json, Value};
@@ -76,11 +78,17 @@ async fn run_inner(args: &WhatChangedArgs) -> Result<()> {
         }
     }
 
-    let r = what_changed(
+    let mut r = what_changed(
         WhatChangedInput { repo_path: renv.path.clone(), since: Some(since), until: args.until.clone(), service: args.service.clone() },
         &code,
     )
     .await?;
+    if let Some(ci) = r.change_impact.as_mut() {
+        let related = related_incidents_for(&config, &ci.modified, &ci.removed, Some(&renv.project)).await;
+        if !related.is_empty() {
+            ci.related_incidents = Some(related);
+        }
+    }
 
     println!("{}", if args.json { what_changed_to_json(&r, args.full) } else { render_what_changed(&r) });
 
@@ -154,6 +162,8 @@ async fn push_change_report(r: &WhatChangedReport, repo_cwd: Option<&str>) {
             "modified": ci.modified.iter().map(|m| sym_name(&m.after)).collect::<Vec<_>>(),
             "removed": ci.removed.iter().map(sym_name).collect::<Vec<_>>(),
         })),
+        // Past incidents in the changed code; redacted like synced investigations.
+        "relatedIncidents": redact_cloud_value(&ci.and_then(|c| c.related_incidents.as_ref()).and_then(|r| serde_json::to_value(r).ok()).unwrap_or_else(|| json!([]))),
         "contributors": r.contributors,
         "queueTopology": r.queue_topology,
     });

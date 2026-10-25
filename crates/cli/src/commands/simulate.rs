@@ -58,6 +58,7 @@ async fn inner(args: &SimulateArgs) -> Result<()> {
             report_id: None,
             incident: None,
             hint: scenario.hint.clone(),
+            agent_session: None,
             repo: Some(renv.project.clone()),
             since: scenario.since.clone(),
             logs_since: None,

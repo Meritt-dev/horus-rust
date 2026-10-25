@@ -45,166 +45,159 @@ pub fn get_skill_install_path(target: &str, global: bool, cwd: Option<&Path>) ->
     }
 }
 
-const BASE_SKILL: &str = r##"# Horus — grounded investigation
+const BASE_SKILL: &str = r##"# Horus: grounded investigation
 
-Horus is a read-only evidence layer over a repo's production runtime (logs, metrics,
+Horus is a **read-only** evidence layer over a repo's production runtime (logs, metrics,
 queues, application state), source intelligence (symbols, call graph, ownership, blast
-radius), and git history. Use it before answering from assumption about runtime
-behavior, what changed, who owns code, blast radius, or whether code paths are actually
-connected. It never mutates anything.
+radius) and git history. Use it instead of assuming; skip it for formatting edits and
+obvious local refactors. It never writes to production systems, only to its own local
+state (`.horus/`, saved investigations, feedback).
 
-Add `--json` to any command (`--format json` for `investigate` and `replay`) when you
-need to parse the result — output is stable and **compact by default**; add `--full`
-for the uncapped structure. Every JSON result carries a `nextSteps` array of
-deterministic follow-up commands; run those rather than guessing.
+## Cheapest path to an answer
 
-## When to invoke
+Stop at the first step that answers.
 
-Invoke Horus when the task involves: an incident / outage / regression / slow / flaky /
-inconsistent behavior; "what changed" or "what caused this"; ownership of a component,
-service, queue, worker, route, or module; blast radius or impact of a change; queues,
-workers, Redis/BullMQ, logs, metrics, MongoDB/Postgres state; where business logic
-lives; whether a flag / enum / status / branch is handled; whether code paths are truly
-connected or only coincidentally similar; or verifying a fix. Skip it for trivial
-syntax/formatting edits and obvious local refactors where blast radius doesn't matter.
+1. Reuse: `horus investigations --json -n 5`. If one matches, use its id with
+   `horus packet <id> --json` or `horus ask <id>`. Neither re-queries.
+2. Symbol, path, owner, impact or change questions: one Source reasoning command, not
+   an investigation.
+3. New incident: `horus packet "<symptom, service, error text>" --for claude --json`
+   runs one investigation and returns a short briefing with caveats and recalled prior
+   incidents. Read the memory section first.
+4. Only if the packet is not enough: `horus investigate --json "<hint>"`, then
+   `horus ask <id>`.
 
-## Setup (once per repo)
+## Output
 
-If there is no `.horus/config.json` (or `horus doctor` reports source intelligence
-missing), run the single onboarding command — idempotent, safe to re-run:
+- Add `--json` to parse a result. `replay` takes `--format json`; `postmortem`,
+  `feedback` and `report` have no JSON mode.
+- JSON from `investigate`, `explain`, `changes`, `timeline` and `what-changed` is
+  **compact by default**. Add `--full` only for raw payloads, commit lists or graph edges.
+  `horus replay <id> --format json` is always full; use `horus packet <id> --json`.
+- `investigate`, `packet`, `explain`, `blast-radius` and `memory show` return
+  `nextSteps`. Prefer them to guessing; they are advisory and some name an MCP tool.
+- Do not add `--ai`: it spends model tokens on a narrative you can write.
 
-```bash
-horus init
-```
+## Setup and health
 
-It checks prerequisites, writes the config, starts the source-intelligence host,
-indexes the code, and stitches the queue map. Add runtime sources with
-`horus connect <type>` (elasticsearch / mongodb / postgres / sentry / axiom / shopify /
-grafana / redis; credentials encrypted at rest — never hand-edit them into config). The
-source backend ships inside the Horus bundle and installs automatically.
+Run `horus init` (**idempotent**) and retry once if `.horus/config.json` is missing,
+`horus doctor --json` reports source intelligence missing, or the host is unreachable or
+the index stale; `horus init --reindex` if the call graph still looks wrong.
+`horus status --json` shows connector health. `horus connect <type>` adds a source
+(`--help` lists types). Never invent credentials or hand-edit them into config; ask the
+user.
 
-## Primary entry points
+## Investigation loop
 
-```bash
-horus status --json                            # config + connector health matrix
-horus investigate --format json "<hint>"       # deterministic, ranked, evidence-backed report
-horus packet "<hint>" --for claude --json      # compact, honesty-framed briefing for your context
-```
-
-`investigate` returns a saved id. Reuse it — never restart from scratch:
+`investigate` and `packet "<hint>"` save the run and return its id. Reuse it.
 
 ```bash
-horus investigations --json                    # list saved ids
-horus replay <id> --format json                # re-render a saved report, no re-query
-horus ask <id> "what evidence is missing?"     # refine against already-collected evidence
-horus postmortem <id>                          # draft an editable postmortem
-horus score <id> --json                        # quality score for the investigation
+horus investigate --json "<hint>" --service <name> --scope <path> --since <git-ref> --logs-since 24h
+horus ask <id> "what evidence is missing?"
+horus score <id> --json
+horus postmortem <id>          # editable Markdown draft
 ```
 
 `horus ask` requires an investigation ID and a directive:
 
 ```bash
 horus ask <id> "what evidence contradicts <hypothesis>?"   # correct
-horus ask "<question>"                                      # WRONG — missing id
+horus ask "<question>"                                      # WRONG: no investigation ID
 ```
+
+`ask` is deterministic, not a chat model. It answers what is missing, what contradicts a
+topic, why confidence is not higher, "focus on <topic>" and "where is X defined?".
+Anything else gets "cannot be answered from the saved evidence".
+
+Stop and report when the top cause has direct evidence and an exact source location,
+when `nextSteps` is empty or repeats what you ran, or when the remaining gaps need a
+connector or credential you lack. Do not run more than three refinement rounds without
+new evidence.
+
+## Empty or degraded results
+
+- **Horus returns nothing**: retry once with a qualified name, `horus search`, a wider
+  window (`--logs-since 7d`) or `--service`, then report the gap.
+- Degraded or missing connector: use what was collected, name the gap, run the remedy
+  in `nextSteps`.
+- `explain` fuzzy match: the symbol was not found. Say so. Report low confidence as low.
 
 ## Runtime evidence
 
-```bash
-horus logs [service] --json
-horus state --json
-horus metrics "<hint>" --json
-horus queues --live --json
-```
-
-## Client-reported issues (Lens work queue)
-
-Lens reports are bug reports clients filed from the running app. They feed
-`investigate` as evidence, but you can also work the backlog DIRECTLY — every reported
-issue, not just the ones relevant to one incident:
+Use these only for a signal the packet lacked.
 
 ```bash
-horus lens --json                 # list every client report, newest first
-horus lens --status open -n 100   # filter + widen the window
-horus lens show <reportId> --json # full detail incl. the code seed (file:line to fix)
+horus logs [service] --since 24h --json   # Elasticsearch or cloud logs; --grep, --where k=v
+horus metrics "<hint>" --since 6h --json  # Grafana
+horus queues --live --json                # Redis/BullMQ, Kafka, Service Bus
+horus state --json                        # MongoDB only
 ```
-
-`show` resolves the top stack frame of the report's first error into a `seed`
-(`file:line:symbol` — the raise site), alongside the comment, route, release/gitSha, and
-failing requests. Native/cloud-backed: needs `horus login` + `horus cloud link`;
-degrades cleanly (a remedy, valid JSON) otherwise. Same reports are exposed to MCP as
-`list_lens_reports` / `get_lens_report`.
 
 ## Source reasoning
 
 ```bash
-horus explain <symbol> --json          # location, callers/callees, impact, resolution kind
-horus blast-radius <symbol> --json     # upstream/downstream reach + criticality
-horus owner <symbol> --json            # likely owner from git history, with confidence
-horus changes <base> [compare] --json  # changed symbols + affected execution flows
-horus what-changed --json              # git truth: files by status, +/- lines, runtime/test/docs/config buckets
-horus timeline --json
+horus search "<words>" --json          # find symbols across configured repos
+horus explain <symbol> --json          # location, callers/callees, impact
+horus trace <from> <to> --json         # shortest code path between two symbols
+horus blast-radius <symbol> --json     # upstream/downstream reach, criticality
+horus owner <symbol> --json            # likely owner from git history
+horus changes <base> [compare] --json  # changed symbols, flows, past incidents in that code
+horus what-changed --json              # changed files by status and bucket
+horus memory show <scope> --json       # past investigations, weak spots
 ```
 
-Qualified names resolve precisely and identically across `search`, `explain`,
-`investigate`, and `blast-radius` — prefer them to disambiguate a method from a
-same-named helper or test: `horus explain PaymentService.charge`, `horus blast-radius
-Reply.hijack`. Product code is preferred over tests/examples by default; add
-`--include-tests` (or `--full`) when you need test callers too.
+Qualified names resolve precisely across `search`, `explain`, `investigate` and
+`blast-radius`: `horus explain PaymentService.charge`. Product code ranks above tests;
+add `--include-tests` to `blast-radius` or `--full` to `explain`.
 
 ## Logic and behavior questions
 
-For "do we auto-draft products when brandType===MANUAL?", "where is this status
-handled?", "does this worker retry failed jobs?", "is this queue idempotent?" — resolve
-from source, not assumptions:
+For "does this worker retry failed jobs?", answer from source. `explain` takes a symbol,
+not a sentence: `horus search`, `horus explain`, then `horus trace`. Horus locates code;
+it does not prove behavior. Read the cited file:line before answering.
 
-```bash
-horus explain "<symbol-or-behavior>" --json
-horus investigate --format json "<behavior question>"
-horus ask <id> "what source evidence proves or disproves this behavior?"
-```
+## Client-reported issues (Lens)
+
+`horus lens --json` lists submitted client reports (`--all` for every status).
+`horus lens show <reportId> --json` adds a `seed` (`file:line:symbol` raise site, or
+null). Needs `horus login` and `horus cloud link`; otherwise it returns a remedy.
 
 ## Change and fix workflow
 
-1. Before editing: `horus investigate` / `horus blast-radius <symbol>` to ground in
-   evidence, ownership, and blast radius.
-2. Edit with normal filesystem tools.
-3. After editing: re-check `horus blast-radius <changed-symbol>`, then
-   `horus ask <id> "does the proposed fix address the collected evidence?"`.
-4. Run the project's own tests / typecheck / lint — Horus does not replace them.
+1. Before editing: `horus blast-radius <symbol> --json` and `horus owner <symbol> --json`.
+2. Edit with normal file tools.
+3. After editing: re-run `horus blast-radius <changed-symbol> --json`, and
+   `horus changes <base> --json` once committed. `horus ask` cannot judge a fix; after
+   it ships, run a fresh `horus investigate` on the original hint.
+4. Run the project's own tests, typecheck and lint.
 
 ## Close the loop
 
-After you ACT on an investigation and know the outcome, record whether Horus pointed at
-the real cause (non-interactive, safe unattended; report once, after you confirm — never
-guess):
+Once the outcome is confirmed, record it once; never guess. The id defaults to the
+latest investigation:
 
 ```bash
-horus feedback <id> --resolved yes      # pointed at the real cause
-horus feedback <id> --resolved partly   # useful lead, not the whole cause
-horus feedback <id> --resolved no       # missed the cause
-# optionally add --manual-estimate-min <minutes>
+horus feedback <id> --resolved yes|partly|no [--cause "<confirmed cause>"]
 ```
 
-If Horus itself is wrong, crashes, or lacks a capability you needed, file it — you see
-its failure modes firsthand, the highest-leverage way to improve it:
+If Horus was wrong or lacked a capability, `horus report "<what>"` prints a pre-filled
+GitHub issue URL and sends nothing. Include the URL in your report.
 
-```bash
-horus report "<what was wrong or missing>"
-```
+## Running unattended
+
+Do not wait for a human: run `horus init` if needed, follow the cheapest path and
+`nextSteps`, apply the stop rules, report. Only credentials need a human.
 
 ## Contract
 
-- Horus evidence is grounded but **not infallible**. State when it is missing, stale,
-  ambient, or not structurally linked to the symptom.
-- **Do not invent runtime evidence** Horus did not collect. If **Horus returns nothing**,
-  say so explicitly — never **hallucinate** a result.
-- Prefer Horus's exact source locations over guesses. If Horus conflicts with direct
-  source inspection, report the discrepancy.
-- Horus is **read-only** evidence collection. **Never use Horus to mutate production**
-  systems, and do not use it as a substitute for tests, typechecks, or source inspection.
-- Report back: conclusion; Horus evidence + exact source locations; gaps / weak / stale
-  evidence; **blast radius** or risk; recommended next action.
+- Horus evidence is grounded but **not infallible**. Say when it is missing, stale,
+  ambient, or not linked to the symptom.
+- **Do not invent runtime evidence**. If **Horus returns nothing**, say so. Never
+  **hallucinate** a result.
+- Prefer Horus's exact source locations. If they conflict with the source, report it.
+- **Never use Horus to mutate production**. It does not replace tests or reading source.
+- Report: conclusion; investigation id; evidence with exact locations; gaps;
+  **blast radius** or risk; next action.
 "##;
 
 const NOTES_CLAUDE: &str = r##"## Claude Code notes

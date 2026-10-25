@@ -14,7 +14,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
 use horus_connectors::memory_index_for_env;
-use horus_connectors::source::{MemoryVectorHit, MemoryVectorIndexLike, SourceMemorySearchRequest, SourceMemoryUpsertRequest};
+use horus_connectors::source::MemoryVectorIndexLike;
 use horus_core::{find_repo_root, HorusConfig};
 use horus_db::{
     get_investigation, get_latest_outcome_label, is_outcome_source, list_outcome_labels, list_queue_edges, open_db,
@@ -28,7 +28,7 @@ use horus_engine::memory_recall::{read_incident_disposition, recall_memory, Cert
 use horus_engine::memory_store::{
     AddLinkOpts, AuditActor, AuditActorKind, AuditCtx, LinkDetection, LocalMemoryStore, MemoryItem, MemoryOrigin, MemoryQuery,
     MemoryRel, MemoryStatus, MemoryStore, MemoryVectorIndex, NewMemoryItem, NewMemoryLink, NoopVectorIndex, PromoteProvenance,
-    RemoveLinkOpts, RemoveLinkSpec, VectorHit, VectorSearch, VectorUpsert,
+    RemoveLinkOpts, RemoveLinkSpec, VectorUpsert,
 };
 use horus_engine::memory_view::{build_memory_view, MemoryViewDeps};
 use horus_engine::render_memory::{memory_view_to_json, render_memory_view};
@@ -36,6 +36,7 @@ use horus_engine::router::{format_route_step, route, RouterCommand, RouterCondit
 use horus_engine::types::InvestigationReport;
 use serde_json::{json, Value};
 
+use crate::lib::vector_index::{LikeAsIndex, NoopAsLike};
 use crate::cli::*;
 use crate::commands::SilentExit;
 use crate::lib::cloud::api::{CloudError, TeamMemoryItem, TeamMemoryListQuery, TeamMemoryPromoteInput};
@@ -145,42 +146,6 @@ async fn close_store(db: DbHandle, root: &str, project: &str) {
 }
 
 // ── Vector index (M2): Source-when-available, Jaccard-Noop fallback ──────────────────────────────
-// ponytail: same adapter pair as commands/packet.rs; hoist both into one lib module when a third
-// caller appears (the engine/connectors traits are structural twins with no shared impl).
-
-struct NoopAsLike(NoopVectorIndex);
-
-#[async_trait]
-impl MemoryVectorIndexLike for NoopAsLike {
-    async fn upsert(&self, i: &SourceMemoryUpsertRequest) -> Result<()> {
-        self.0
-            .upsert(VectorUpsert { memory_id: i.memory_id.clone(), claim: i.claim.clone(), repo: i.repo.clone(), scope: i.scope.clone() })
-            .await
-    }
-    async fn search(&self, i: &SourceMemorySearchRequest) -> Result<Vec<MemoryVectorHit>> {
-        let hits = self.0.search(VectorSearch { query: i.query.clone(), repo: i.repo.clone(), limit: i.limit as f64 }).await?;
-        Ok(hits.into_iter().map(|h| MemoryVectorHit { memory_id: h.memory_id, score: h.score }).collect())
-    }
-    async fn remove(&self, memory_id: &str) -> Result<()> {
-        MemoryVectorIndex::remove(&self.0, memory_id).await
-    }
-}
-
-struct LikeAsIndex(Arc<dyn MemoryVectorIndexLike>);
-
-#[async_trait]
-impl MemoryVectorIndex for LikeAsIndex {
-    async fn upsert(&self, i: VectorUpsert) -> Result<()> {
-        self.0.upsert(&SourceMemoryUpsertRequest { memory_id: i.memory_id, claim: i.claim, repo: i.repo, scope: i.scope }).await
-    }
-    async fn search(&self, i: VectorSearch) -> Result<Vec<VectorHit>> {
-        let hits = self.0.search(&SourceMemorySearchRequest { query: i.query, repo: i.repo, limit: i.limit as i64 }).await?;
-        Ok(hits.into_iter().map(|h| VectorHit { memory_id: h.memory_id, score: h.score }).collect())
-    }
-    async fn remove(&self, memory_id: &str) -> Result<()> {
-        self.0.remove(memory_id).await
-    }
-}
 
 /// Never fails: an unresolvable env falls back to the Jaccard Noop index.
 fn build_vector_index(config: &HorusConfig, project: &str) -> LikeAsIndex {

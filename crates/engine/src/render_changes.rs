@@ -26,6 +26,19 @@ fn render_symbol_list(label: &str, symbols: &[Symbol]) -> Vec<String> {
     lines
 }
 
+/// First `n` characters of `t`.
+pub(crate) fn head(t: &str, n: usize) -> String {
+    t.chars().take(n).collect()
+}
+
+fn clip(t: &str, n: usize) -> String {
+    if t.chars().count() > n {
+        format!("{}…", head(t, n - 1))
+    } else {
+        t.to_string()
+    }
+}
+
 /// Sectioned text report for terminal output.
 pub fn render_change_impact(r: &ChangeImpactReport) -> String {
     let mut lines: Vec<String> = vec![];
@@ -53,6 +66,16 @@ pub fn render_change_impact(r: &ChangeImpactReport) -> String {
     let removed = render_symbol_list("Removed", &r.removed);
     if !removed.is_empty() {
         lines.extend(removed);
+        lines.push("".into());
+    }
+
+    if let Some(related) = r.related_incidents.as_ref().filter(|r| !r.is_empty()) {
+        lines.push("## Past incidents in this code".into());
+        for i in related {
+            let symbols: Vec<&str> = i.matched_symbols.iter().map(|id| id.rsplit(':').next().unwrap_or(id)).collect();
+            lines.push(format!("- {} {} ({})", head(&i.created_at, 10), clip(&i.hint, 100), i.investigation_id));
+            lines.push(format!("  touches {}; cause then: {}", symbols.join(", "), clip(&i.top_cause, 140)));
+        }
         lines.push("".into());
     }
 
@@ -114,6 +137,9 @@ pub fn change_impact_to_compact_object(r: &ChangeImpactReport) -> Value {
     out.insert("removed".into(), Value::Array(removed));
     out.insert("modified".into(), Value::Array(modified));
     out.insert("affectedFlows".into(), Value::Array(affected_flows));
+    if let Some(related) = r.related_incidents.as_ref().filter(|r| !r.is_empty()) {
+        out.insert("relatedIncidents".into(), serde_json::to_value(related).unwrap_or_default());
+    }
     if truncated_count > 0 {
         out.insert("truncated".into(), json!(true));
         out.insert("truncatedCount".into(), json!(truncated_count));

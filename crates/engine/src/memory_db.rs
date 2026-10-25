@@ -169,8 +169,10 @@ impl MemoryStorage for SqliteMemoryStorage {
     // ---- incident_memory ----
     async fn select_incident_memory_by_project(&self, project: &str, limit: usize) -> Result<Vec<IncidentMemory>> {
         let args = vec![text(project), Sql::Integer(limit as i64)];
+        // Newest first: one row per investigation, so an unordered cap would hide recent incidents.
+        let sql = format!("SELECT {INCIDENT_COLS} FROM incident_memory WHERE project = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2");
         self.db
-            .with_conn(move |c| query_rows(c, &format!("SELECT {INCIDENT_COLS} FROM incident_memory WHERE project = ?1 LIMIT ?2"), args, row_incident))
+            .with_conn(move |c| query_rows(c, &sql, args, row_incident))
             .await
     }
 

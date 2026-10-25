@@ -15,10 +15,10 @@ use horus_db::{get_investigation, open_db, DbHandle};
 use horus_engine::memory::{create_local_memory_store, LocalMemoryStoreOpts};
 use horus_engine::memory_db::SqliteMemoryStorage;
 use horus_connectors::memory_index_for_env;
-use horus_connectors::source::{MemoryVectorHit, MemoryVectorIndexLike, SourceMemorySearchRequest, SourceMemoryUpsertRequest};
+use horus_connectors::source::MemoryVectorIndexLike;
 use horus_core::ResolvedEnvironment;
 use horus_engine::memory_recall::{recall_memory, RecallCodeProvider, RecallOptions, RecallQuery};
-use horus_engine::memory_store::{MemoryQuery, MemoryVectorIndex, NoopVectorIndex, VectorHit, VectorSearch, VectorUpsert};
+use horus_engine::memory_store::{MemoryQuery, NoopVectorIndex};
 use horus_engine::migrate_report::migrate_report;
 use horus_engine::packet::{
     build_packet, packet_to_json, render_packet_markdown, AgentPreset, PacketFreshness, PacketOptions, RepoIdentity,
@@ -27,6 +27,7 @@ use horus_engine::packet::{
 use horus_engine::types::InvestigationReport;
 use regex::Regex;
 
+use crate::lib::vector_index::{LikeAsIndex, NoopAsLike};
 use crate::cli::*;
 use crate::commands::SilentExit;
 use crate::lib::cloud::session::repo_root_or_cwd;
@@ -286,44 +287,6 @@ async fn hint_packet_with(
 }
 
 // ── Vector-index bridge ───────────────────────────────────────────────────────────────────────
-// needs upstreaming: the engine `MemoryVectorIndex` and connectors `MemoryVectorIndexLike` are
-// structural mirrors (TS: one interface) with no adapter between them.
-
-/// Engine `NoopVectorIndex` exposed as the connectors fallback seam.
-struct NoopAsLike(NoopVectorIndex);
-
-#[async_trait::async_trait]
-impl MemoryVectorIndexLike for NoopAsLike {
-    async fn upsert(&self, i: &SourceMemoryUpsertRequest) -> Result<()> {
-        self.0
-            .upsert(VectorUpsert { memory_id: i.memory_id.clone(), claim: i.claim.clone(), repo: i.repo.clone(), scope: i.scope.clone() })
-            .await
-    }
-    async fn search(&self, i: &SourceMemorySearchRequest) -> Result<Vec<MemoryVectorHit>> {
-        let hits = self.0.search(VectorSearch { query: i.query.clone(), repo: i.repo.clone(), limit: i.limit as f64 }).await?;
-        Ok(hits.into_iter().map(|h| MemoryVectorHit { memory_id: h.memory_id, score: h.score }).collect())
-    }
-    async fn remove(&self, memory_id: &str) -> Result<()> {
-        MemoryVectorIndex::remove(&self.0, memory_id).await
-    }
-}
-
-/// A connectors index exposed as the engine recall seam.
-struct LikeAsIndex(Arc<dyn MemoryVectorIndexLike>);
-
-#[async_trait::async_trait]
-impl MemoryVectorIndex for LikeAsIndex {
-    async fn upsert(&self, i: VectorUpsert) -> Result<()> {
-        self.0.upsert(&SourceMemoryUpsertRequest { memory_id: i.memory_id, claim: i.claim, repo: i.repo, scope: i.scope }).await
-    }
-    async fn search(&self, i: VectorSearch) -> Result<Vec<VectorHit>> {
-        let hits = self.0.search(&SourceMemorySearchRequest { query: i.query, repo: i.repo, limit: i.limit as i64 }).await?;
-        Ok(hits.into_iter().map(|h| VectorHit { memory_id: h.memory_id, score: h.score }).collect())
-    }
-    async fn remove(&self, memory_id: &str) -> Result<()> {
-        self.0.remove(memory_id).await
-    }
-}
 
 /// `CodeProviderRecallAdapter` over a borrowed provider (the engine adapter needs an owned `Arc`).
 struct BorrowedRecall<'a>(&'a horus_connectors::source::SourceCodeProvider);

@@ -68,6 +68,10 @@ pub struct InvestigationInput {
     pub incident: Option<IncidentContext>,
     /// Free-text hint naming a symbol, file, or behaviour to investigate.
     pub hint: String,
+    /// Calling agent session (Claude Code `CLAUDE_CODE_SESSION_ID`, or `HORUS_AGENT_SESSION`), recorded
+    /// so recall can later be measured against real session continuity. Context only; never scored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
     /// Optional git ref or range (e.g. `v1.2.0` or `abc123..HEAD`) to bound history.
@@ -97,6 +101,7 @@ impl InvestigationInput {
             report_id: None,
             incident: None,
             hint: hint.into(),
+            agent_session: None,
             repo: None,
             since: None,
             logs_since: None,

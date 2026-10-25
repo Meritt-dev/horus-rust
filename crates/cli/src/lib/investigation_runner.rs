@@ -22,7 +22,7 @@ use horus_connectors::redis::RedisStateRuntimeProvider;
 use horus_connectors::runtime_queue::QueueEvidenceProvider;
 use horus_connectors::sentry::SentryProvider;
 use horus_connectors::shopify::ShopifyProvider;
-use horus_connectors::source::SourceCodeProvider;
+use horus_connectors::source::{SourceClientOptions, SourceCodeProvider, SourceHttpClient, SourceMemoryVectorIndex, SourceMemoryVectorIndexOptions};
 use horus_connectors::state::{DatabaseStateProvider, StateProvider};
 use horus_connectors::{
     additional_queues_for_env, additional_state_for_env, axiom_for_env, cloud_logs_for_env, code_for_env, code_for_url,
@@ -44,6 +44,7 @@ use serde_json::Value;
 use crate::lib::cloud::auth_store::read_auth;
 use crate::lib::cloud::context_store::read_cloud_config;
 use crate::lib::cloud::memory_sync::{memory_sync_context, sync_linked_memory, MemorySyncOptions};
+use crate::lib::vector_index::LikeAsIndex;
 use crate::lib::ensure_host::resolve_source_host_url;
 use crate::lib::format::{bold, yellow};
 use crate::lib::freshness::{read_index_meta, STALE_INDEX_MS};
@@ -123,6 +124,8 @@ pub struct InvestigationContext {
     pub metrics: Option<Box<dyn MetricsProvider>>,
     /// Default service scope: CLI flag > ES connector's serviceName > None.
     pub service: Option<String>,
+    /// Local memory vector index on the verified source host; None in runtime-only mode.
+    pub recall_index: Option<LikeAsIndex>,
 }
 
 #[derive(Default)]
@@ -156,6 +159,7 @@ pub async fn build_investigation_context(renv: ResolvedEnvironment, opts: BuildC
 
     // `code_for_env` only returns a provider when the repo has a configured sourceHostUrl.
     let source_url = renv.repositories.first().and_then(|r| r.source_host_url.clone()).filter(|u| !u.is_empty());
+    let mut host_url = source_url.clone();
     let runtime_only = match (&source_url, opts.unattended) {
         (Some(url), false) => {
             // Self-heal + identity guard: the resolved URL may differ from the configured one when
@@ -163,6 +167,7 @@ pub async fn build_investigation_context(renv: ResolvedEnvironment, opts: BuildC
             let resolved = resolve_source_host_url(Path::new(&renv.path), url, None, log).await;
             if let Some(h) = resolved.host_url.as_deref().filter(|h| resolved.ok && *h != url) {
                 code = Some(code_for_url(h));
+                host_url = Some(h.to_string());
             }
             !resolved.ok
         }
@@ -209,6 +214,12 @@ pub async fn build_investigation_context(renv: ResolvedEnvironment, opts: BuildC
         db: open_db().await?,
         // Runtime-only degrade: no source provider, so the engine skips seed resolution.
         code: if runtime_only { None } else { code },
+        // Short timeout: recall similarity is optional context and must not delay the investigation.
+        // No Jaccard fallback: its overlap scores are not embedding similarities.
+        recall_index: host_url.filter(|_| !runtime_only).map(|url| {
+            let client = SourceHttpClient::new(SourceClientOptions { base_url: url, timeout_ms: Some(3000), max_retries: None });
+            LikeAsIndex(Arc::new(SourceMemoryVectorIndex::new(client, SourceMemoryVectorIndexOptions::default())))
+        }),
         runtime_only,
         service,
         renv,
@@ -349,6 +360,7 @@ pub async fn run_one_investigation_with(
     let mut deps = EngineDeps::new(&ctx.db);
     deps.memory_scope = scope;
     deps.on_startup_recall = Some(&on_startup);
+    deps.recall_index = ctx.recall_index.as_ref().map(|i| i as &dyn horus_engine::memory_store::MemoryVectorIndex);
     deps.code = ctx.code.as_ref().map(|c| c as &dyn horus_engine::code_provider::CodeProvider);
     deps.rerank = rerank_fn.as_ref().map(|f| f as &horus_engine::Reranker);
     deps.logs = ctx.logs.as_ref().map(|l| l as &dyn LogsProvider);
@@ -374,6 +386,11 @@ pub async fn run_one_investigation_with(
             report_id: input.report_id,
             incident: input.incident,
             hint: input.hint,
+            agent_session: ["HORUS_AGENT_SESSION", "CLAUDE_CODE_SESSION_ID"]
+                .iter()
+                .find_map(|k| std::env::var(k).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
             repo: Some(renv.project.clone()),
             since: input.since,
             logs_since: input.logs_since,

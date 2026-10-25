@@ -1,7 +1,7 @@
 //! HOR-30 — Render helpers for WhatChangedReport.
 
 use crate::code_provider::RepoState;
-use crate::render_changes::change_impact_to_compact_object;
+use crate::render_changes::{change_impact_to_compact_object, head};
 use crate::what_changed::WhatChangedReport;
 use serde_json::{json, Map, Value};
 
@@ -84,6 +84,13 @@ pub fn render_what_changed(r: &WhatChangedReport) -> String {
         ));
         for f in &ci.affected_flows {
             lines.push(format!("  - {}", f.flow_name));
+        }
+        if let Some(related) = ci.related_incidents.as_ref().filter(|r| !r.is_empty()) {
+            lines.push("".into());
+            lines.push("## Past incidents in this code".into());
+            for i in related {
+                lines.push(format!("  - {} {} ({})", head(&i.created_at, 10), head(&i.hint, 100), i.investigation_id));
+            }
         }
     }
 

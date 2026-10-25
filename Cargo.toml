@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.24.2"
+version = "0.24.3"
 edition = "2021"
 license = "MIT"
 # GitHub repo that hosts the Rust release archives. dist, cargo-binstall and `horus update`

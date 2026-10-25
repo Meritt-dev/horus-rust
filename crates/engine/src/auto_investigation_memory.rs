@@ -19,7 +19,7 @@ use serde_json::{json, Map, Value};
 use crate::js;
 use crate::memory::{derive_signature, derive_tags};
 use crate::memory_detect::{recurrence_reason, RecurrenceSide};
-use crate::memory_recall::{incident_context_of, read_incident_disposition};
+use crate::memory_recall::{append_hint, incident_context_of, read_incident_disposition};
 use crate::memory_store::{
     is_hidden_status, to_iso_string, AddLinkOpts, AuditCtx, LinkDetection, MemoryItem, MemoryKind, MemoryQuery, MemoryStore,
     MemoryUpdate, NewMemoryItem, NewMemoryLink, UpdateOpts,
@@ -159,6 +159,7 @@ pub async fn create_investigation_memory(
         payload: Some(json!({
             "investigationId": investigation_id,
             "hint": fields.hint,
+            "hints": [fields.hint],
             "topHypothesis": fields.top_hypothesis_category,
             // First sighting: a single investigation is "recurred 1×". Bumped on each later recurrence.
             "recurrenceCount": 1,
@@ -296,7 +297,13 @@ pub async fn consolidate_recurrence(
     payload.insert("lastSeenAt".into(), Value::String(to_iso_string(&report_time)));
     payload.insert("investigationIds".into(), json!(investigation_ids));
     // Refresh the "latest finding" provenance; keep the original first-seen id for reference.
+    // Every hint this incident was investigated under, so recall matches any earlier wording too.
+    let prior_hints = match payload.get("hints").filter(|h| !h.is_null()) {
+        Some(h) => h.clone(),
+        None => json!(payload.get("hint").and_then(Value::as_str).map(|h| vec![h]).unwrap_or_default()),
+    };
     payload.insert("hint".into(), Value::String(fields.hint.clone()));
+    payload.insert("hints".into(), json!(append_hint(Some(&prior_hints), &fields.hint)));
     payload.insert("topHypothesis".into(), fields.top_hypothesis_category.clone().map(Value::String).unwrap_or(Value::Null));
     let first_seen = prev_single.or_else(|| seed_ids.first().cloned()).or_else(|| this_id.map(str::to_string));
     payload.insert("investigationId".into(), first_seen.map(Value::String).unwrap_or(Value::Null));

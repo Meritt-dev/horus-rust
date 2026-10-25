@@ -59,8 +59,8 @@ use crate::hypotheses::{generate_hypotheses, HypothesisContext};
 use crate::js;
 use crate::memory::{derive_tags, recall_similar, store_incident_memory};
 use crate::memory_db::SqliteMemoryStorage;
-use crate::memory_recall::{recall_startup_incidents, StartupIncident, StartupRecallOpts, StartupValidation};
-use crate::memory_store::{AuditActor, AuditCtx, MemoryQuery, MemoryStore};
+use crate::memory_recall::{index_incident_hint, recall_startup_incidents, StartupIncident, StartupRecallOpts, StartupValidation};
+use crate::memory_store::{AuditActor, AuditCtx, MemoryQuery, MemoryStore, MemoryVectorIndex};
 use crate::normalize::{normalize_evidence, NormalizeContext};
 use crate::ownership::{estimate_ownership, OwnershipDeps, OwnershipEstimate};
 use crate::render::format_symbol_location;
@@ -88,6 +88,8 @@ pub type Reranker = dyn Fn(&[CauseCandidate]) -> Vec<CauseCandidate> + Send + Sy
 /// TS options object. One failing provider never aborts the investigation.
 pub struct EngineDeps<'a> {
     pub memory_scope: Option<String>,
+    /// Optional local memory vector index; startup recall adds embedding similarity of stored hints.
+    pub recall_index: Option<&'a dyn MemoryVectorIndex>,
     pub on_startup_recall: Option<&'a (dyn Fn(&[StartupIncident]) + Send + Sync)>,
     /// Source-intelligence provider. `None` ⇒ degraded, RUNTIME-ONLY run (HOR-319 layer-2).
     pub code: Option<&'a dyn CodeProvider>,
@@ -126,6 +128,7 @@ impl<'a> EngineDeps<'a> {
     pub fn new(db: &'a DbHandle) -> Self {
         Self {
             memory_scope: None,
+            recall_index: None,
             on_startup_recall: None,
             code: None,
             db,
@@ -1354,7 +1357,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
     // Startup recall (memory) — checked before broad collection.
     let mut startup_recall: Vec<StartupIncident> = match deps.store {
         Some(store) if !STARTUP_RECALL_OFF.is_match(&std::env::var("HORUS_STARTUP_RECALL").unwrap_or_default()) => {
-            recall_startup_incidents(store, &input, StartupRecallOpts { sync_scope: deps.memory_scope.clone(), now: Some(now) })
+            recall_startup_incidents(store, &input, StartupRecallOpts { sync_scope: deps.memory_scope.clone(), now: Some(now), index: deps.recall_index })
                 .await
                 .unwrap_or_default()
         }
@@ -4188,8 +4191,13 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
         if let Some(store) = deps.store.filter(|_| auto_investigation_memory_enabled()) {
             let audit = AuditCtx { actor: AuditActor::system(), note: Some("auto: investigation memory (HOR-432)".into()) };
             let report_time = persisted.as_ref().and_then(|p| p.1).unwrap_or(now);
-            if let Err(err) = capture_investigation_memory(store, Some(pid), &report, report_time, &audit).await {
-                report.memory_capture_error = Some(connector_failure_reason(&err));
+            match capture_investigation_memory(store, Some(pid), &report, report_time, &audit).await {
+                Ok(captured) => {
+                    if let (Some(index), Some(memory_id), Some(repo)) = (deps.recall_index, captured.memory_id.as_deref(), report.input.repo.as_deref()) {
+                        index_incident_hint(index, repo, memory_id, &report.input.hint).await;
+                    }
+                }
+                Err(err) => report.memory_capture_error = Some(connector_failure_reason(&err)),
             }
         }
     }

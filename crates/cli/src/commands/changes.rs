@@ -11,6 +11,7 @@ use crate::commands::SilentExit;
 use crate::lib::ai_provider::{print_ai_interpretation, AiInterpretationOpts};
 use crate::lib::engine_code::{create_code, fail, load_config};
 use crate::lib::format::red;
+use crate::lib::related_incidents::related_incidents_for;
 
 pub const CHANGES_AI_CONTRACT: &str = "Provide a clearly separated AI change-impact review with:
 
@@ -41,7 +42,11 @@ async fn changes(args: &ChangesArgs) -> Result<()> {
         eprintln!("{}", red("Source-intelligence host unreachable — run: horus init"));
         return Err(SilentExit(1).into());
     }
-    let report = change_impact(ChangeImpactInput { base: args.base.clone(), compare: args.compare.clone() }, &code).await?;
+    let mut report = change_impact(ChangeImpactInput { base: args.base.clone(), compare: args.compare.clone() }, &code).await?;
+    let related = related_incidents_for(&config, &report.modified, &report.removed, None).await;
+    if !related.is_empty() {
+        report.related_incidents = Some(related);
+    }
 
     if args.json {
         println!("{}", change_impact_to_json(&report, args.full));
