@@ -37,7 +37,7 @@ pub const KNOWLEDGE_SCHEMA_VERSION: u32 = 1;
 /// - runtime:         observed from live runtime evidence
 /// - agent-confirmed: proposed by an agent and confirmed against source
 /// - imported:        brought in from an external knowledge tool (HOR-292, e.g.
-///   the Maison Safqa MCP knowledge-base), not freshly parsed by Horus
+///   the MCP knowledge-base), not freshly parsed by Horus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum SourceType {
@@ -600,7 +600,7 @@ pub struct ManifestGit {
 pub struct KnowledgeManifest {
     pub schema_version: u32,
     pub generated_at: String,
-    /// What produced the snapshot (e.g. horus-cli, maison-safqa-import).
+    /// What produced the snapshot (e.g. horus-cli, mcp-kb-import).
     pub generator: ToolRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,

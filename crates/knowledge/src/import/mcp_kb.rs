@@ -1,4 +1,4 @@
-//! Maison Safqa MCP knowledge-base importer (HOR-292).
+//! MCP knowledge-base importer (HOR-292).
 //!
 //! The first adapter that maps the prototype `knowledge-base.json` (GraphQL
 //! operations, input/response types, enums, frontend patterns, domain concepts,
@@ -12,7 +12,7 @@ use crate::schema::*;
 use anyhow::{anyhow, Result};
 use serde_json::{Map, Value};
 
-pub const MAISON_SAFQA_SOURCE: &str = "maison-safqa-mcp";
+pub const MCP_KB_SOURCE: &str = "mcp-kb-import";
 
 #[derive(Debug, Clone, Default)]
 pub struct ImportOptions {
@@ -137,10 +137,10 @@ fn objects<'a>(kb: &'a Map<String, Value>, key: &str) -> Vec<&'a Map<String, Val
     }
 }
 
-/// Import a parsed Maison Safqa MCP knowledge-base into a `KnowledgeSnapshot`.
+/// Import a parsed MCP knowledge-base into a `KnowledgeSnapshot`.
 /// Pure: no file IO. Errors only when `raw` is not a KB-shaped object.
-pub fn import_maison_safqa_knowledge_base(raw: &Value, opts: &ImportOptions) -> Result<ImportResult> {
-    let kb = check_kb_shape(raw).map_err(|m| anyhow!("Not a Maison Safqa knowledge-base: {m}"))?;
+pub fn import_mcp_knowledge_base(raw: &Value, opts: &ImportOptions) -> Result<ImportResult> {
+    let kb = check_kb_shape(raw).map_err(|m| anyhow!("Not an MCP knowledge-base: {m}"))?;
     let mut warnings: Vec<String> = Vec::new();
 
     // `String(kb.version)` when present and not null (an empty string stays, but still warns).

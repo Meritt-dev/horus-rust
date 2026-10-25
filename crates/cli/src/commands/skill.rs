@@ -142,7 +142,7 @@ horus trace <from> <to> --json         # shortest code path between two symbols
 horus blast-radius <symbol> --json     # upstream/downstream reach, criticality
 horus owner <symbol> --json            # likely owner from git history
 horus changes <base> [compare] --json  # changed symbols, flows, past incidents in that code
-horus what-changed --json              # changed files by status and bucket
+horus what-changed --json              # changed files by status, past incidents
 horus memory show <scope> --json       # past investigations, weak spots
 ```
 
@@ -181,7 +181,7 @@ horus feedback <id> --resolved yes|partly|no [--cause "<confirmed cause>"]
 ```
 
 If Horus was wrong or lacked a capability, `horus report "<what>"` prints a pre-filled
-GitHub issue URL and sends nothing. Include the URL in your report.
+GitHub issue URL (and tries to open it) and sends nothing. Include the URL in your report.
 
 ## Running unattended
 
