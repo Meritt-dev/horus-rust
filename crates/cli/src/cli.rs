@@ -7,9 +7,9 @@
 use clap::{ArgAction, Args, Parser, Subcommand};
 use horus_core::HORUS_VERSION;
 
-const REPO_HELP: &str = "repository/project WITHIN the loaded config (default: inferred from cwd) — cross-repo targeting is --config or cd";
-const CONFIG_TS_HELP: &str = "path to horus.config.ts";
-const AI_MODEL_HELP: &str = "override the AI model (default: claude-opus-4-8)";
+const REPO_HELP: &str = "project name in the loaded config (default: inferred from cwd); to target another repo, pass --config or cd into it";
+const CONFIG_TS_HELP: &str = "path to a Horus config file (.json, .js or .ts; default: nearest .horus/config.json)";
+const AI_MODEL_HELP: &str = "override the AI model (default: the model saved by `horus connect ai`, else claude-opus-4-8)";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -51,7 +51,7 @@ pub enum Command {
     Projects,
 
     #[command(
-        about = "Summarize release/demo readiness: DB, source intelligence, connectors, and local config (HOR-97)"
+        about = "Summarize release/demo readiness: DB, source intelligence, connectors, and local config"
     )]
     Readiness(ReadinessArgs),
 
@@ -59,17 +59,17 @@ pub enum Command {
     Db(DbArgs),
 
     #[command(
-        about = "Add or update a runtime connector in .horus/config.json (logs, metrics, databases, queues, or ai)"
+        about = "Add or update a runtime connector in .horus/config.json (e.g. elasticsearch, mongodb, postgres, grafana, redis, kafka, sentry, shopify, or ai)"
     )]
     Connect(ConnectArgs),
 
     #[command(
-        about = "Configure the outbound notify sink for `horus watch` (webhook / cloud) — HOR-454"
+        about = "Configure the outbound notify sink for `horus watch` (webhook / cloud)"
     )]
     Notify(NotifyArgs),
 
     #[command(
-        about = "Manage encrypted connector credentials (.horus/secrets.local.json) — HOR-452"
+        about = "Manage encrypted connector credentials (.horus/secrets.local.json)"
     )]
     Secrets(SecretsArgs),
 
@@ -92,12 +92,12 @@ pub enum Command {
     Explain(ExplainArgs),
 
     #[command(
-        about = "Query the local project-knowledge index (.horus/index) — offline, no Cloud"
+        about = "Query the local project-knowledge index (.horus/index) — offline; push/pull sync with the linked cloud project"
     )]
     Knowledge(KnowledgeArgs),
 
     #[command(
-        about = "Inspect deterministic incident memory + code-knowledge for a scope (project-scoped, offline)"
+        about = "Inspect and manage deterministic incident memory + code-knowledge (project-scoped; works offline)"
     )]
     Memory(MemoryArgs),
 
@@ -222,7 +222,8 @@ pub enum Command {
     Score(ScoreArgs),
 
     #[command(
-        about = "Ask about or refine a saved investigation — reuses evidence; code-locating\n  questions re-query the source host for fresh file:line citations.\n  Code-locating (fresh source lookup):\n    \"where is processOrder defined?\" · \"which file has OrderService?\"\n  Questions (direct answers):\n    \"what evidence contradicts <topic>?\"  · \"what evidence is missing?\"\n    \"why is confidence not higher?\"\n  Topic filters (deterministic scoping):\n    \"focus on queue behavior\" · \"ignore deployment changes\" · \"retry\""
+        about = "Ask about or refine a saved investigation — reuses evidence; code-locating questions re-query the source host for fresh file:line citations",
+        after_help = "\nExamples:\n  Code-locating (fresh source lookup):\n    \"where is processOrder defined?\" · \"which file has OrderService?\"\n  Questions (direct answers):\n    \"what evidence contradicts <topic>?\"  · \"what evidence is missing?\"\n    \"why is confidence not higher?\"\n  Topic filters (deterministic scoping):\n    \"focus on queue behavior\" · \"ignore deployment changes\" · \"retry\"\n"
     )]
     Ask(AskArgs),
 
@@ -306,10 +307,10 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct DoctorArgs {
-    /// path to horus.config.js for connector checks
+    /// path to a Horus config file for connector checks (default: nearest .horus/config.json)
     #[arg(short, long, value_name = "path")]
     pub config: Option<String>,
-    /// output machine-readable JSON instead of human-readable text
+    /// output JSON
     #[arg(long)]
     pub json: bool,
 }
@@ -347,7 +348,7 @@ pub struct InitArgs {
     /// pre-push-safe: refresh PROJECT KNOWLEDGE for changed files only (does not reanalyze the source graph)
     #[arg(long)]
     pub changed: bool,
-    /// speed hint, used with --changed
+    /// accepted with --changed for compatibility (no additional effect)
     #[arg(long)]
     pub fast: bool,
     /// force a full source re-analysis: stop the host, wipe .horus/source, rebuild (purges stale graph edges)
@@ -360,7 +361,7 @@ pub struct InitArgs {
 
 #[derive(Debug, Args)]
 pub struct ReadinessArgs {
-    /// path to horus.config.js
+    /// path to a Horus config file (default: nearest .horus/config.json)
     #[arg(short, long, value_name = "path")]
     pub config: Option<String>,
     /// append AI readiness summary and recommended next action
@@ -391,7 +392,7 @@ pub enum DbCommand {
 
 #[derive(Debug, Args)]
 pub struct DbMigrateFromTsArgs {
-    /// TS PGlite data directory (default: horus.db beside this CLI's database, i.e. ~/.horus/horus.db)
+    /// data directory of the TypeScript Horus database (default: ~/.horus/horus.db, beside this CLI's database)
     #[arg(long, value_name = "dir")]
     pub from: Option<String>,
 }
@@ -462,7 +463,7 @@ pub struct ConnectArgs {
     /// target environment (default: first environment in config)
     #[arg(long, value_name = "name")]
     pub env: Option<String>,
-    /// AI provider for `connect ai` (anthropic / claude / codex / gemini)
+    /// AI provider for `connect ai` (anthropic / claude / codex / gemini / kimi / cursor)
     #[arg(long, value_name = "name")]
     pub provider: Option<String>,
     /// Anthropic API key for `connect ai`
@@ -566,7 +567,7 @@ pub enum NotifyCommand {
 
 #[derive(Debug, Args)]
 pub struct NotifySetArgs {
-    /// path to a horus config file
+    /// path to a .horus/config.json file (default: nearest one)
     #[arg(short, long, value_name = "path")]
     pub config: Option<String>,
     /// environment to configure (default: first)
@@ -591,7 +592,7 @@ pub struct NotifySetArgs {
 
 #[derive(Debug, Args)]
 pub struct NotifyShowArgs {
-    /// path to a horus config file
+    /// path to a .horus/config.json file (default: nearest one)
     #[arg(short, long, value_name = "path")]
     pub config: Option<String>,
     /// environment to show (default: first)
@@ -601,7 +602,7 @@ pub struct NotifyShowArgs {
 
 #[derive(Debug, Args)]
 pub struct NotifyTestArgs {
-    /// path to a horus config file
+    /// path to a Horus config file (default: nearest .horus/config.json)
     #[arg(short, long, value_name = "path")]
     pub config: Option<String>,
     /// environment to test (default: first)
@@ -611,7 +612,7 @@ pub struct NotifyTestArgs {
 
 #[derive(Debug, Args)]
 pub struct NotifyRemoveArgs {
-    /// path to a horus config file
+    /// path to a .horus/config.json file (default: nearest one)
     #[arg(short, long, value_name = "path")]
     pub config: Option<String>,
     /// environment to clear (default: first)
@@ -673,10 +674,10 @@ pub struct HostsArgs {
 pub struct StatusArgs {
     #[arg(short, long, value_name = "path", help = CONFIG_TS_HELP)]
     pub config: Option<String>,
-    /// environment name (e.g. production)
+    /// show only this environment (default: all environments)
     #[arg(long, value_name = "name")]
     pub env: Option<String>,
-    /// output machine-readable JSON instead of human-readable text
+    /// output JSON
     #[arg(long)]
     pub json: bool,
 }
@@ -695,7 +696,7 @@ pub struct ExplainArgs {
     /// output JSON
     #[arg(long)]
     pub json: bool,
-    /// full JSON: uncapped lists + snippets (default: compact)
+    /// full JSON: uncapped lists + snippets, and include test callers (default: compact, product-only)
     #[arg(long)]
     pub full: bool,
 }
@@ -978,7 +979,7 @@ pub struct MemoryAccuracyArgs {
     /// only count labels from the last N days
     #[arg(long, value_name = "n")]
     pub days: Option<u32>,
-    /// count the full retained history (disable the default recent window)
+    /// count the full retained history (default window: last 30 days)
     #[arg(long)]
     pub all: bool,
     /// max labels to scan
@@ -1065,7 +1066,7 @@ pub enum EvalCommand {
     )]
     Build(EvalBuildArgs),
     #[command(
-        about = "Print the baseline hit-rate (== memory accuracy) + a feature-separation diagnostic"
+        about = "Print the baseline hit-rate (same as `memory accuracy`) + a feature-separation diagnostic"
     )]
     Baseline(EvalBaselineArgs),
 }
@@ -1160,7 +1161,7 @@ pub struct InvestigateArgs {
     pub hint: String,
     #[arg(short, long, value_name = "path", help = CONFIG_TS_HELP)]
     pub config: Option<String>,
-    /// environment name (e.g. production)
+    /// environment name (default: the only environment, else production)
     #[arg(long, value_name = "name")]
     pub env: Option<String>,
     #[arg(long, value_name = "name", help = REPO_HELP)]
@@ -1195,10 +1196,10 @@ pub struct InvestigateArgs {
     /// include raw evidence payloads in JSON output (default: compact)
     #[arg(long)]
     pub full: bool,
-    /// enrich report with AI narrative (requires ANTHROPIC_API_KEY; falls back to deterministic on failure)
+    /// enrich report with AI narrative (needs an Anthropic key from `horus connect ai` or ANTHROPIC_API_KEY; skipped for JSON output; falls back to deterministic on failure)
     #[arg(long)]
     pub ai: bool,
-    /// AI model for --ai (default: claude-opus-4-8)
+    /// AI model for --ai (default: the model saved by `horus connect ai`, else claude-opus-4-8)
     #[arg(long, value_name = "model")]
     pub ai_model: Option<String>,
 }
@@ -1209,7 +1210,7 @@ pub struct PacketArgs {
     pub hint_or_id: String,
     #[arg(short, long, value_name = "path", help = CONFIG_TS_HELP)]
     pub config: Option<String>,
-    /// environment name (e.g. production)
+    /// environment name (default: the only environment, else production)
     #[arg(long, value_name = "name")]
     pub env: Option<String>,
     /// resolve the seed only from symbols under this path (e.g. packages/core)
@@ -1246,7 +1247,7 @@ pub struct WatchArgs {
 pub struct ServiceArgs {
     #[arg(value_name = "action")]
     pub action: String,
-    /// absolute service settings JSON
+    /// service settings JSON (default ~/.horus/service/settings.json)
     #[arg(long, value_name = "path")]
     pub settings: Option<String>,
     /// launchd profile label
@@ -1255,7 +1256,7 @@ pub struct ServiceArgs {
     /// job identity for retry/worker
     #[arg(long, value_name = "id")]
     pub job: Option<String>,
-    /// internal Claude activity session identity
+    /// session id for the internal activity hook (set by the service, not by users)
     #[arg(long, value_name = "id")]
     pub session: Option<String>,
     /// project root to pause/resume (default: cwd)
@@ -1270,7 +1271,7 @@ pub struct ServiceArgs {
     /// confirm destination was inspected before retrying an uncertain delivery
     #[arg(long)]
     pub delivery_checked: bool,
-    /// isolated named test profile only
+    /// skip the Claude CLI auth preflight on check/install (isolated test profiles only)
     #[arg(long)]
     pub skip_checks: bool,
 }
@@ -1338,7 +1339,7 @@ pub struct WhatChangedArgs {
     pub config: Option<String>,
     #[arg(long, value_name = "name", help = REPO_HELP)]
     pub repo: Option<String>,
-    /// git --since (default "7 days ago")
+    /// git --since date, or a git ref such as HEAD~10 (default "7 days ago")
     #[arg(long, value_name = "when")]
     pub since: Option<String>,
     /// git --until
@@ -1461,7 +1462,7 @@ pub struct InvestigationsArgs {
     /// max rows
     #[arg(short = 'n', long, value_name = "n")]
     pub limit: Option<u32>,
-    /// output machine-readable JSON instead of human-readable text
+    /// output JSON
     #[arg(long)]
     pub json: bool,
 }
@@ -1506,7 +1507,7 @@ pub struct LensListArgs {
     /// restrict to a single Lens site id
     #[arg(long, value_name = "id")]
     pub site: Option<String>,
-    /// output machine-readable JSON instead of human-readable text
+    /// output JSON
     #[arg(long)]
     pub json: bool,
 }
@@ -1518,7 +1519,7 @@ pub struct LensShowArgs {
     /// the report's Lens site id (skips the cross-site scan)
     #[arg(long, value_name = "id")]
     pub site: Option<String>,
-    /// output machine-readable JSON instead of human-readable text
+    /// output JSON
     #[arg(long)]
     pub json: bool,
 }
@@ -1536,10 +1537,10 @@ pub struct ReplayArgs {
     /// text | markdown | json
     #[arg(long, value_name = "fmt", default_value = "text")]
     pub format: String,
-    /// enrich report with AI narrative (requires ANTHROPIC_API_KEY; falls back to deterministic on failure)
+    /// enrich report with AI narrative (needs an Anthropic key from `horus connect ai` or ANTHROPIC_API_KEY; skipped for --format json; falls back to deterministic on failure)
     #[arg(long)]
     pub ai: bool,
-    /// AI model for --ai (default: claude-opus-4-8)
+    /// AI model for --ai (default: the model saved by `horus connect ai`, else claude-opus-4-8)
     #[arg(long, value_name = "model")]
     pub ai_model: Option<String>,
     /// re-run AI even if a stored judgment already exists
@@ -1559,10 +1560,10 @@ pub struct PostmortemArgs {
     /// overwrite the output file if it already exists
     #[arg(long)]
     pub force: bool,
-    /// append an AI-generated summary section (requires ANTHROPIC_API_KEY; falls back gracefully)
+    /// append an AI-generated summary section (needs an Anthropic key from `horus connect ai` or ANTHROPIC_API_KEY; falls back gracefully)
     #[arg(long)]
     pub ai_summary: bool,
-    /// AI model for --ai-summary (default: claude-opus-4-8)
+    /// AI model for --ai-summary (default: the model saved by `horus connect ai`, else claude-opus-4-8)
     #[arg(long, value_name = "model")]
     pub ai_model: Option<String>,
     /// re-run AI even if a stored judgment already exists
@@ -1619,7 +1620,7 @@ pub struct ScoresArgs {
     /// max rows
     #[arg(short = 'n', long, value_name = "n")]
     pub limit: Option<u32>,
-    /// output machine-readable JSON instead of human-readable text
+    /// output JSON
     #[arg(long)]
     pub json: bool,
 }
@@ -1662,10 +1663,10 @@ pub struct LogsArgs {
     pub service: Option<String>,
     #[arg(short, long, value_name = "path", help = CONFIG_TS_HELP)]
     pub config: Option<String>,
-    /// environment name (e.g. production)
+    /// environment name (default: the only environment, else production)
     #[arg(long, value_name = "name")]
     pub env: Option<String>,
-    /// time window, e.g. 24h, 7d, or an ISO date
+    /// time window, e.g. 24h, 7d, or an ISO date (default 7d)
     #[arg(long, value_name = "when")]
     pub since: Option<String>,
     /// minimum level (with --raw): trace|debug|info|warn|error|fatal
@@ -1703,7 +1704,7 @@ pub struct LogsArgs {
 pub struct StateArgs {
     #[arg(short, long, value_name = "path", help = CONFIG_TS_HELP)]
     pub config: Option<String>,
-    /// environment name (e.g. production)
+    /// environment name (default: the only environment, else production)
     #[arg(long, value_name = "name")]
     pub env: Option<String>,
     /// staleness threshold in hours (default 24)
@@ -1725,7 +1726,7 @@ pub struct MetricsArgs {
     pub hint: Option<String>,
     #[arg(short, long, value_name = "path", help = CONFIG_TS_HELP)]
     pub config: Option<String>,
-    /// window, e.g. 1h, 6h, 24h
+    /// window, e.g. 1h, 6h, 24h (default 1h)
     #[arg(long, value_name = "when")]
     pub since: Option<String>,
     /// range step seconds
@@ -1737,7 +1738,7 @@ pub struct MetricsArgs {
     /// raw datasource query escape hatch
     #[arg(long, value_name = "promql")]
     pub query: Option<String>,
-    /// JSON output
+    /// output JSON
     #[arg(long)]
     pub json: bool,
     /// append AI narration of metric findings (default mode only, not --query or --json)
@@ -1878,7 +1879,7 @@ pub struct CloudLinkArgs {
 
 #[derive(Debug, Args)]
 pub struct CloudSyncArgs {
-    /// path to horus config for the local database
+    /// path to a Horus config file (selects which project's investigations to upload)
     #[arg(short, long, value_name = "path")]
     pub config: Option<String>,
     /// max local investigations to consider
@@ -1931,7 +1932,7 @@ pub struct ReportArgs {
     /// comma-separated GitHub labels (e.g. bug,cli)
     #[arg(long, value_name = "list")]
     pub labels: Option<String>,
-    #[arg(short, long, value_name = "path", help = CONFIG_TS_HELP)]
+    #[arg(short, long, value_name = "path", help = "accepted for compatibility; not used by this command")]
     pub config: Option<String>,
 }
 

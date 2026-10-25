@@ -1355,8 +1355,9 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
     let logs_window = || log_window_from(input.logs_since.as_deref().or(input.since.as_deref()), now);
 
     // Startup recall (memory) — checked before broad collection.
+    let recall_enabled = !STARTUP_RECALL_OFF.is_match(&std::env::var("HORUS_STARTUP_RECALL").unwrap_or_default());
     let mut startup_recall: Vec<StartupIncident> = match deps.store {
-        Some(store) if !STARTUP_RECALL_OFF.is_match(&std::env::var("HORUS_STARTUP_RECALL").unwrap_or_default()) => {
+        Some(store) if recall_enabled => {
             recall_startup_incidents(store, &input, StartupRecallOpts { sync_scope: deps.memory_scope.clone(), now: Some(now), index: deps.recall_index })
                 .await
                 .unwrap_or_default()
@@ -1389,7 +1390,8 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
         }
         _ => None,
     };
-    if let Some(cb) = deps.on_startup_recall {
+    // Only report when recall actually ran: "no relevant match" is misleading when it was off.
+    if let (Some(cb), Some(_), true) = (deps.on_startup_recall, deps.store, recall_enabled) {
         cb(&startup_recall);
     }
     let mut recall_trace: Vec<RecallTraceEntry> = vec![];

@@ -8,7 +8,7 @@ use super::consent::{is_ci, resolve_consent};
 use super::store::{load_or_init_telemetry_state, now_iso, update_telemetry_state};
 use crate::lib::format::{bold, color_enabled, cyan, dim};
 
-pub const PRIVACY_URL: &str = "https://horus.sh/privacy";
+pub const PRIVACY_URL: &str = "https://horus.sh/docs/security#what-leaves";
 
 /// argv tokens for which the banner is suppressed (meta/control commands).
 const SUPPRESS_FIRST_TOKEN: &[&str] = &["telemetry", "help"];
