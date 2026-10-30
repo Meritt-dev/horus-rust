@@ -111,6 +111,9 @@ fn apply_field_overrides(base: &ElasticsearchFieldMapping, o: &ResolvedElasticse
     if let Some(v) = o.event_code_keyword {
         m.event_code_keyword = v;
     }
+    if let Some(v) = &o.detail {
+        m.detail_fields = v.clone();
+    }
     m
 }
 

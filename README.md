@@ -72,7 +72,7 @@ The intended differences are listed in [DIVERGENCES.md](DIVERGENCES.md). The mai
 ## Build from source
 
 ```sh
-HORUS_VERSION=0.24.3 cargo build --release -p horus-cli   # → target/release/horus
+HORUS_VERSION=0.24.4 cargo build --release -p horus-cli   # → target/release/horus
 ```
 
 Cross-platform release builds are covered in [PORTING.md](PORTING.md), and cutting a release in [docs/RELEASE.md](docs/RELEASE.md).

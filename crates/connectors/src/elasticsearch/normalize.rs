@@ -105,6 +105,10 @@ pub struct ElasticsearchFieldMapping {
     pub event_code_field: String,
     /// Whether event_code_field has a .keyword sub-field for terms aggregations.
     pub event_code_keyword: bool,
+    /// Fields holding the specific failure text behind a generic message template (dotted
+    /// paths, e.g. `context.error_message`). Checked before the built-in detail discovery.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub detail_fields: Vec<String>,
 }
 
 /// Default mapping for the Meritt shared logger (pino-based).
@@ -120,6 +124,7 @@ pub static MERITT_FIELD_MAPPING: LazyLock<ElasticsearchFieldMapping> = LazyLock:
     request_id_field: None,
     event_code_field: "event_code".into(),
     event_code_keyword: true,
+    detail_fields: vec![],
 });
 
 /// Mapping for ECS (Elastic Common Schema) deployments.
@@ -137,6 +142,7 @@ pub static ECS_FIELD_MAPPING: LazyLock<ElasticsearchFieldMapping> = LazyLock::ne
     // ECS event.code is already keyword-typed — no .keyword sub-field needed.
     event_code_field: "event.code".into(),
     event_code_keyword: false,
+    detail_fields: vec![],
 });
 
 /// Validate a field mapping and return an actionable error for invalid config.

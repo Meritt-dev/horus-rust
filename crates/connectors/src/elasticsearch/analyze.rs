@@ -49,6 +49,24 @@ pub struct ErrorSignature {
     /// current/baseline volume ratio (Infinity → JSON null when new).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ratio: Option<f64>,
+    /// The specific failure text behind a generic message template, e.g. the provider's
+    /// rejection reason under "Error updating product" (first line only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_detail: Option<String>,
+    /// Dotted path the detail was read from, so callers can aggregate on it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_detail_field: Option<String>,
+}
+
+impl ErrorSignature {
+    /// The message template plus its specific failure detail, when one was found.
+    pub fn message_with_detail(&self) -> Option<String> {
+        match (self.sample_message.as_deref().filter(|m| !m.is_empty()), self.sample_detail.as_deref()) {
+            (Some(m), Some(d)) => Some(format!("{m}: {d}")),
+            (Some(m), None) => Some(m.to_string()),
+            (None, d) => d.map(str::to_string),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -124,6 +142,12 @@ pub fn build_error_analysis_body(q: &LogQuery, field: &str, mapping: &Elasticsea
 
     filters.extend(build_where_filters(q.where_.as_deref()));
     let must = build_text_must(q, mapping);
+    // ECS / pino / OpenTelemetry homes for the failure reason ride along with the sample.
+    let source_fields: Vec<&str> =
+        [mapping.message_field.as_str(), mapping.level_field.as_str(), "component", "log_logger", "context", "detail", "error", "err", "exception"]
+            .into_iter()
+            .chain(mapping.detail_fields.iter().map(String::as_str))
+            .collect();
 
     json!({
         "size": 0,
@@ -141,14 +165,7 @@ pub fn build_error_analysis_body(q: &LogQuery, field: &str, mapping: &Elasticsea
                     "sample": {
                         "top_hits": {
                             "size": 1,
-                            "_source": [
-                                &mapping.message_field,
-                                &mapping.level_field,
-                                "component",
-                                "log_logger",
-                                "context",
-                                "detail",
-                            ],
+                            "_source": source_fields,
                             "sort": [{ &mapping.timestamp_field: { "order": "desc" } }],
                         }
                     },
@@ -188,9 +205,89 @@ fn read_level(src: &Map<String, Value>, level_field: &str) -> Option<LogLevel> {
     None
 }
 
+/// Object roots that may carry the failure reason. Under the first three every leaf is
+/// error data; under `context`/`detail` only error-named keys count.
+const DETAIL_ROOTS: &[&str] = &["error", "err", "exception", "context", "detail"];
+const DETAIL_KEY_WORDS: &[&str] = &["error", "err", "exception", "reason", "cause", "fault", "failure"];
+/// Identifier-like leaves name the failure but don't explain it.
+const DETAIL_SKIP_SUFFIXES: &[&str] = &["id", "ids", "code", "status", "count", "url", "name"];
+const DETAIL_MAX_CHARS: usize = 300;
+
+fn key_words(key: &str) -> impl Iterator<Item = String> + '_ {
+    key.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_ascii_lowercase)
+}
+
+fn is_detail_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    key_words(key).any(|w| DETAIL_KEY_WORDS.contains(&w.as_str())) || DETAIL_KEY_WORDS.iter().any(|w| lower.starts_with(w))
+}
+
+fn first_line(s: &str) -> String {
+    slice_chars(s.trim().lines().next().unwrap_or("").trim(), DETAIL_MAX_CHARS)
+}
+
+/// The specific failure text in a sample log beyond its message template, and the
+/// dotted path it came from. Configured `detail_fields` win; otherwise the most
+/// message-like error-named string under the error/context roots (stack traces last).
+pub fn extract_detail(src: &Map<String, Value>, detail_fields: &[String], message: Option<&str>) -> Option<(String, String)> {
+    let usable = |v: &str| {
+        let t = v.trim();
+        !t.is_empty() && !matches!(t, "undefined" | "null" | "[object Object]" | "{}") && Some(t) != message.map(str::trim)
+    };
+    for f in detail_fields {
+        if let Some(v) = as_str(get_field(src, f)).filter(|v| usable(v)) {
+            return Some((f.clone(), first_line(v)));
+        }
+    }
+    // (rank, path depth, path, text); lower rank wins.
+    let mut best: Option<(u8, usize, String, String)> = None;
+    fn walk(v: &Value, path: &str, depth: usize, in_error: bool, out: &mut Vec<(String, bool, String)>) {
+        match v {
+            Value::String(s) => out.push((path.to_string(), in_error, s.clone())),
+            Value::Object(m) if depth < 4 => {
+                for (k, child) in m {
+                    walk(child, &format!("{path}.{k}"), depth + 1, in_error || is_detail_key(k), out);
+                }
+            }
+            _ => {}
+        }
+    }
+    for root in DETAIL_ROOTS {
+        let Some(v) = src.get(*root) else { continue };
+        let mut leaves = Vec::new();
+        walk(v, root, 0, matches!(*root, "error" | "err" | "exception"), &mut leaves);
+        for (path, in_error, text) in leaves {
+            let leaf = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+            if !in_error || !usable(&text) || DETAIL_SKIP_SUFFIXES.iter().any(|s| leaf == *s || leaf.ends_with(&format!("_{s}"))) {
+                continue;
+            }
+            let rank = if leaf.contains("stack") {
+                3
+            } else if leaf.ends_with("message") || leaf.ends_with("msg") || leaf == "reason" || leaf == "description" {
+                0
+            } else if is_detail_key(&leaf) {
+                1
+            } else {
+                2
+            };
+            let depth = path.matches('.').count();
+            if best.as_ref().is_none_or(|b| (rank, depth) < (b.0, b.1)) {
+                best = Some((rank, depth, path, first_line(&text)));
+            }
+        }
+    }
+    best.map(|(_, _, path, text)| (path, text))
+}
+
 /// Parse an error-analysis aggregation response into a LogAnalysis (no baseline).
 /// `message_field` must match the field requested in the sample top_hits _source.
-pub fn parse_error_analysis(resp: &Value, window: AnalysisWindow, message_field: &str, level_field: Option<&str>) -> LogAnalysis {
+pub fn parse_error_analysis(
+    resp: &Value,
+    window: AnalysisWindow,
+    message_field: &str,
+    level_field: Option<&str>,
+    detail_fields: &[String],
+) -> LogAnalysis {
     static EMPTY: std::sync::LazyLock<Map<String, Value>> = std::sync::LazyLock::new(Map::new);
     let aggs = resp.get("aggregations").and_then(Value::as_object).unwrap_or(&EMPTY);
     let total_node = resp.get("hits").and_then(|h| h.get("total"));
@@ -216,6 +313,7 @@ pub fn parse_error_analysis(resp: &Value, window: AnalysisWindow, message_field:
                 .or_else(|| as_str(sample_src.get("message")))
                 .map(str::to_string);
             let sample_context = sample_src.get("context").and_then(Value::as_object).cloned();
+            let detail = extract_detail(sample_src, detail_fields, sample_message.as_deref());
             let level = level_field.and_then(|lf| read_level(sample_src, lf));
             let key = js_string_or_empty(b.get("key"));
 
@@ -226,12 +324,15 @@ pub fn parse_error_analysis(resp: &Value, window: AnalysisWindow, message_field:
                 last_seen: as_str(last).unwrap_or("").to_string(),
                 services,
                 level,
-                sample_message,
+                // Redact here: samples flow straight into evidence titles and payloads.
+                sample_message: sample_message.as_deref().map(redact_sensitive_string),
                 sample_component: as_str(sample_src.get("component")).or_else(|| as_str(sample_src.get("log_logger"))).map(str::to_string),
                 sample_context,
                 baseline_count: None,
                 is_new: None,
                 ratio: None,
+                sample_detail_field: detail.as_ref().map(|d| d.0.clone()),
+                sample_detail: detail.map(|d| redact_sensitive_string(&d.1)),
             }
         })
         .collect();
@@ -278,6 +379,9 @@ pub fn redact_error_signature(sig: &ErrorSignature) -> ErrorSignature {
     let mut out = sig.clone();
     if let Some(m) = &sig.sample_message {
         out.sample_message = Some(redact_sensitive_string(m));
+    }
+    if let Some(d) = &sig.sample_detail {
+        out.sample_detail = Some(redact_sensitive_string(d));
     }
     out
 }

@@ -92,7 +92,17 @@ impl LogsProvider for ElasticsearchLogsProvider {
 
     async fn aggregate_errors(&self, q: &LogQuery, field: Option<&str>) -> Result<Vec<ErrorBucket>> {
         let sig_field = field.unwrap_or(&self.mapping.event_code_field);
-        let res = self.client.search(self.resolve_index(q), &build_error_agg_body(q, sig_field, &self.mapping)).await?;
+        let mut body = build_error_agg_body(q, sig_field, &self.mapping);
+        let res = self.client.search(self.resolve_index(q), &body).await?;
+        let buckets = agg_to_error_buckets(&res);
+        // Other fields are aggregated on their `.keyword` sub-field. Keyword-typed fields
+        // and subfields of a `flattened` object (a common mapping for free-form log
+        // context) have none, so retry once on the bare field before reporting nothing.
+        if !buckets.is_empty() || sig_field == self.mapping.event_code_field {
+            return Ok(buckets);
+        }
+        body["aggs"]["by_key"]["terms"]["field"] = Value::String(sig_field.to_string());
+        let res = self.client.search(self.resolve_index(q), &body).await?;
         Ok(agg_to_error_buckets(&res))
     }
 
@@ -114,6 +124,7 @@ impl LogsProvider for ElasticsearchLogsProvider {
             AnalysisWindow { from: Some(from.clone()), to: Some(to.clone()) },
             &self.mapping.message_field,
             Some(&self.mapping.level_field),
+            &self.mapping.detail_fields,
         );
 
         // Baseline = the immediately preceding window of equal length, so we can flag
@@ -123,7 +134,7 @@ impl LogsProvider for ElasticsearchLogsProvider {
                 let span = to_ms - from_ms;
                 let baseline_q = LogQuery { from: Some(iso_from_ms(from_ms - span)), to: Some(from.clone()), ..q.clone() };
                 let base_res = self.client.search(self.resolve_index(q), &build_error_analysis_body(&baseline_q, sig_field, &self.mapping)).await?;
-                let baseline = parse_error_analysis(&base_res, AnalysisWindow::default(), &self.mapping.message_field, None);
+                let baseline = parse_error_analysis(&base_res, AnalysisWindow::default(), &self.mapping.message_field, None, &self.mapping.detail_fields);
                 annotate_against_baseline(&mut analysis, &baseline.signatures);
             }
         }

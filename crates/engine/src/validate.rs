@@ -54,6 +54,13 @@ fn clamp01(n: f64) -> f64 {
     n.clamp(0.0, 1.0)
 }
 
+/// Confidence gained from `n` supporting items: +0.15 for the first, each further item
+/// worth 60% of the one before (0.15, 0.24, 0.29, 0.33 … never above 0.375). More of the
+/// same kind of evidence corroborates less each time, so volume alone can't reach certainty.
+fn support_gain(n: i64) -> f64 {
+    0.15 * (1.0 - 0.6f64.powi(n.max(0) as i32)) / 0.4
+}
+
 /// Validate hypotheses against the available evidence. Sorted by adjusted confidence
 /// descending, with 'eliminated' verdicts pushed to the end.
 pub fn validate_hypotheses(hyps: &[Hypothesis], evidence: &[Evidence]) -> Vec<ValidatedHypothesis> {
@@ -68,7 +75,7 @@ pub fn validate_hypotheses(hyps: &[Hypothesis], evidence: &[Evidence]) -> Vec<Va
                 h.contradicting_evidence_ids.iter().filter(|id| present.contains(id.as_str())).count() as i64;
 
             let mut confidence =
-                clamp01(h.confidence + 0.15 * supporting_present as f64 - 0.3 * contradicting_present as f64);
+                clamp01(h.confidence + support_gain(supporting_present) - 0.3 * contradicting_present as f64);
 
             // Many correlated metric series must not outvote a directly observed failure.
             if h.category == "benign-variance" && contradicting_present > 0 {

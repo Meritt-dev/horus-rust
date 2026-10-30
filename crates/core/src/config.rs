@@ -148,6 +148,9 @@ pub struct ElasticsearchFields {
     pub event_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_code_keyword: Option<bool>,
+    /// Fields holding the specific failure text behind a generic message template.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Vec<String>>,
 }
 pub type ResolvedElasticsearchFields = ElasticsearchFields;
 
@@ -1059,6 +1062,7 @@ fn connectors_schema() -> Z {
         ("requestId", ostr()),
         ("eventCode", ostr()),
         ("eventCodeKeyword", obool()),
+        ("detail", ostrs()),
     ]);
     let elasticsearch = obj(vec![
         ("indexPattern", ostr()),

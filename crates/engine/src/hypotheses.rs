@@ -7,7 +7,10 @@
 use horus_core::{Evidence, EvidenceKind};
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
+use regex::Regex;
 use serde_json::Value;
+use std::collections::HashSet;
+use std::sync::LazyLock;
 
 use crate::correlate::CorrelationResult;
 use crate::graph::{implicated_evidence_ids_by_node_type, GraphNodeType, InvestigationGraph};
@@ -78,6 +81,23 @@ fn focus_string(focus: Option<Option<i64>>) -> String {
     }
 }
 
+static RETRY_TEXT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(retr(y|ies|ied|ying)|re-?attempt|attempts?|back-?off|re-?queu|redeliver)").unwrap()
+});
+
+/// Log evidence the engine classified as tied to the seed (not ambient runtime noise).
+fn is_direct(e: &Evidence) -> bool {
+    e.payload.get("relevanceClass").and_then(Value::as_str) == Some("direct")
+}
+
+/// Does the signature's code, message or failure detail talk about retrying?
+fn mentions_retry(e: &Evidence) -> bool {
+    let field = |k: &str| e.payload.get(k).and_then(Value::as_str).unwrap_or("");
+    [e.title.as_str(), field("signature"), field("sampleMessage"), field("sampleDetail")]
+        .iter()
+        .any(|t| RETRY_TEXT.is_match(t))
+}
+
 /// Generate the full competing set of hypotheses, sorted by confidence descending (stable).
 pub fn generate_hypotheses(
     evidence: &[Evidence],
@@ -96,16 +116,30 @@ pub fn generate_hypotheses(
     // HOR-410: only name queue-runtime tooling when the repo actually has queue topology.
     let has_queue_topology = !queues.is_empty();
 
-    // Log spikes (ratio >= 2.0): consistent with retry amplification.
-    let log_spike_ev_ids: Vec<String> = evidence
+    // Retry amplification: a spiking error tied to the failing path whose own text shows
+    // retrying. A spike alone isn't enough — unrelated noise spikes too, and any number of
+    // loud unrelated errors must not add up to a retry storm.
+    let retry_spike_ev_ids: Vec<String> = evidence
         .iter()
-        .filter(|e| e.kind == EvidenceKind::Log && e.ratio.is_some_and(|r| r >= 2.0))
+        .filter(|e| e.kind == EvidenceKind::Log && e.ratio.is_some_and(|r| r >= 2.0) && is_direct(e) && mentions_retry(e))
         .map(|e| e.id.clone())
         .collect();
 
-    // DB / application-state evidence: infra-level issues rather than pure code bugs.
-    let state_ev_ids: Vec<String> =
-        evidence.iter().filter(|e| e.kind == EvidenceKind::State).map(|e| e.id.clone()).collect();
+    // DB / application-state evidence: only collections that are active now. Stale or
+    // legacy collections describe old data, not a degraded datastore.
+    let inactive_state_ev_ids: HashSet<&str> = evidence
+        .iter()
+        .filter(|e| {
+            e.kind == EvidenceKind::State
+                && matches!(e.payload.get("classification").and_then(Value::as_str), Some("stale" | "legacy"))
+        })
+        .map(|e| e.id.as_str())
+        .collect();
+    let state_ev_ids: Vec<String> = evidence
+        .iter()
+        .filter(|e| e.kind == EvidenceKind::State && !inactive_state_ev_ids.contains(e.id.as_str()))
+        .map(|e| e.id.clone())
+        .collect();
 
     let all_queue_backlog_ev_ids: Vec<String> =
         ctx.queue_backlog_ev_ids_by_queue.iter().flat_map(|m| m.values()).flatten().cloned().collect();
@@ -116,7 +150,10 @@ pub fn generate_hypotheses(
     let graph_implicated_collection_ev_ids: Vec<String> = ctx
         .graph
         .map(|g| implicated_evidence_ids_by_node_type(g, GraphNodeType::Collection))
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|id| !inactive_state_ev_ids.contains(id.as_str()))
+        .collect();
 
     let mut hyps: Vec<Hypothesis> = vec![];
 
@@ -252,7 +289,7 @@ pub fn generate_hypotheses(
     });
 
     // e. retry-storm — always emitted. Contradiction: queue starvation.
-    let retry_storm_support = dedup(log_spike_ev_ids.iter().chain(all_queue_backlog_ev_ids.iter()).cloned());
+    let retry_storm_support = dedup(retry_spike_ev_ids.iter().chain(all_queue_backlog_ev_ids.iter()).cloned());
     hyps.push(Hypothesis {
         id: new_id(),
         category: "retry-storm".into(),

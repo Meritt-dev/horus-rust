@@ -18,7 +18,7 @@ use horus_connectors::axiom::AxiomProvider;
 use horus_connectors::bullmq::{analyze_queue_runtime, QueueRuntimeProvider, QueueRuntimeState, QueueSignalKind};
 use horus_connectors::cloud_logs::StructuredLogSource;
 use horus_connectors::duration::{DimensionSpec, DurationByDimension, DurationDimensionOptions};
-use horus_connectors::elasticsearch::{CompatibilityOptions, IssueSeverity, LogAnalysis, LogLevel, LogQuery, LogsProvider};
+use horus_connectors::elasticsearch::{CompatibilityOptions, ErrorSignature, IssueSeverity, LogAnalysis, LogLevel, LogQuery, LogsProvider};
 use horus_connectors::git::provider::GitCommit;
 use horus_connectors::grafana::{AnalyzeOptions, Anomaly, MetricsProvider};
 use horus_connectors::jsutil::short_ts;
@@ -340,24 +340,33 @@ const GENERIC_RELEVANCE_TERMS: &[&str] = &[
 ];
 
 /// Classify a log signature's relevance to the investigation seed (HOR-156).
+///
+/// A signature is direct when its code names a seed/hint term, when its message (plus
+/// failure detail) shares at least two of them, or when it comes from the configured
+/// service. Service names match whole tokens only: environment parts like `prod` would
+/// otherwise substring-match terms like `products` and make every error direct.
 pub fn classify_log_relevance(
     sig_key: &str,
     sig_services: &[String],
     seed_terms: &[String],
     input_service: Option<&str>,
+    sig_text: Option<&str>,
 ) -> (LogRelevanceClass, String) {
     let domain_terms: Vec<&String> =
         seed_terms.iter().filter(|t| !GENERIC_RELEVANCE_TERMS.contains(&t.as_str())).collect();
     if domain_terms.is_empty() {
         return (LogRelevanceClass::Direct, "no specific seed context — included by default".into());
     }
-    let mut combined: Vec<String> = tokenize(sig_key);
-    for s in sig_services {
-        combined.extend(tokenize(s));
-    }
+    let specific = |c: &String| !GENERIC_RELEVANCE_TERMS.contains(&c.as_str());
+    let same_word = |t: &str, c: &str| t == c || t.strip_suffix('s') == Some(c) || c.strip_suffix('s') == Some(t);
+    let key_tokens: Vec<String> = tokenize(sig_key).into_iter().filter(specific).collect();
+    let service_tokens: Vec<String> = sig_services.iter().flat_map(|s| tokenize(s)).filter(specific).collect();
     let matching: Vec<&str> = domain_terms
         .iter()
-        .filter(|t| combined.iter().any(|c| c.contains(t.as_str()) || t.contains(c.as_str())))
+        .filter(|t| {
+            key_tokens.iter().any(|c| c.contains(t.as_str()) || t.contains(c.as_str()))
+                || service_tokens.iter().any(|c| same_word(t, c))
+        })
         .map(|t| t.as_str())
         .collect();
     if !matching.is_empty() {
@@ -365,6 +374,20 @@ pub fn classify_log_relevance(
             LogRelevanceClass::Direct,
             format!("matches seed terms: {}", matching.iter().take(3).copied().collect::<Vec<_>>().join(", ")),
         );
+    }
+    if let Some(text) = sig_text {
+        let text_tokens: Vec<String> = tokenize(text).into_iter().filter(specific).collect();
+        let in_text: Vec<&str> = domain_terms
+            .iter()
+            .filter(|t| text_tokens.iter().any(|c| same_word(t, c)))
+            .map(|t| t.as_str())
+            .collect();
+        if in_text.len() >= 2 {
+            return (
+                LogRelevanceClass::Direct,
+                format!("message matches seed terms: {}", in_text.iter().take(3).copied().collect::<Vec<_>>().join(", ")),
+            );
+        }
     }
     if let Some(svc) = input_service.filter(|s| !s.is_empty()) {
         let lower = svc.to_lowercase();
@@ -1971,8 +1994,14 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
 
             let log_seed_terms = seed_terms_for(true);
             for s in a.signatures.iter().take(15) {
-                let (relevance_class, relevance_reason) =
-                    classify_log_relevance(&s.key, &s.services, &log_seed_terms, input.service.as_deref());
+                let full_message = s.message_with_detail();
+                let (relevance_class, relevance_reason) = classify_log_relevance(
+                    &s.key,
+                    &s.services,
+                    &log_seed_terms,
+                    input.service.as_deref(),
+                    full_message.as_deref(),
+                );
                 let is_new = s.is_new == Some(true);
                 let spike = s.ratio.is_some_and(|r| r >= 1.5);
                 let mut tags: Vec<String> = vec![];
@@ -1990,11 +2019,12 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                     format!(" · {}", s.services.iter().take(3).cloned().collect::<Vec<_>>().join(", "))
                 };
                 let tag_str = if tags.is_empty() { String::new() } else { format!(" [{}]", tags.join(", ")) };
-                let msg_str = s
-                    .sample_message
+                // The failure detail is often the only text that names the cause, so it gets
+                // room in the title next to the (usually generic) message template.
+                let msg_str = full_message
                     .as_deref()
                     .filter(|m| !m.is_empty())
-                    .map(|m| format!(" — \"{}\"", js::slice_chars(WS_RUN.replace_all(m, " ").trim(), 90)))
+                    .map(|m| format!(" — \"{}\"", js::slice_chars(WS_RUN.replace_all(m, " ").trim(), 200)))
                     .unwrap_or_default();
                 let title = js::slice_chars(
                     &format!(
@@ -2004,7 +2034,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                         short_ts(&s.first_seen),
                         short_ts(&s.last_seen)
                     ),
-                    220,
+                    340,
                 );
                 let relevance = match (relevance_class, is_new, spike) {
                     (LogRelevanceClass::Direct, true, _) => 0.95,
@@ -2027,6 +2057,8 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                         "isNew": is_new,
                         "ratio": opt_f64(s.ratio),
                         "sampleMessage": opt_str(s.sample_message.as_deref()),
+                        "sampleDetail": opt_str(s.sample_detail.as_deref()),
+                        "sampleDetailField": opt_str(s.sample_detail_field.as_deref()),
                         "relevanceClass": relevance_class.as_str(),
                         "relevanceReason": relevance_reason,
                     }),
@@ -2047,7 +2079,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                     direct_signatures.push(DirectSignature {
                         key: s.key.clone(),
                         count: s.count,
-                        message: s.sample_message.clone().unwrap_or_default(),
+                        message: full_message.clone().unwrap_or_default(),
                     });
                     direct_ev_id_by_key.entry(s.key.clone()).or_insert(id);
                 } else {
@@ -2090,7 +2122,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                             seed_emitted_joins.push(SeedEmittedJoin {
                                 code: code_str.clone(),
                                 count: sig.count,
-                                message: sig.sample_message.clone().unwrap_or_default(),
+                                message: sig.message_with_detail().unwrap_or_default(),
                                 ev_id: existing.clone(),
                                 level,
                                 raised_by_seed: true,
@@ -2119,6 +2151,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                         "isNew": sig.is_new == Some(true),
                         "ratio": opt_f64(sig.ratio),
                         "sampleMessage": opt_str(sig.sample_message.as_deref()),
+                        "sampleDetail": opt_str(sig.sample_detail.as_deref()),
                         "relevanceClass": "direct",
                         "relevanceReason": format!("exact event_code match to the source signal ({code_str})"),
                         "crossSignalJoin": true,
@@ -2140,14 +2173,14 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                 direct_signatures.push(DirectSignature {
                     key: code_str.clone(),
                     count: sig.count,
-                    message: sig.sample_message.clone().unwrap_or_default(),
+                    message: sig.message_with_detail().unwrap_or_default(),
                 });
                 direct_ev_id_by_key.entry(code_str.clone()).or_insert(id.clone());
                 if seed_emitted_codes.contains(&code_str) {
                     seed_emitted_joins.push(SeedEmittedJoin {
                         code: code_str.clone(),
                         count: sig.count,
-                        message: sig.sample_message.clone().unwrap_or_default(),
+                        message: sig.message_with_detail().unwrap_or_default(),
                         ev_id: id,
                         level,
                         raised_by_seed: true,
@@ -2174,7 +2207,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                 let meaningful: Vec<&String> = meaningful_hint_tokens.iter().filter(|t| t.chars().count() >= 4).collect();
                 let hint_relevant = |i: usize| {
                     let s = &a.signatures[i];
-                    let msg = s.sample_message.as_deref().unwrap_or("").to_lowercase();
+                    let msg = s.message_with_detail().unwrap_or_default().to_lowercase();
                     meaningful.iter().any(|t| s.key.to_lowercase().contains(t.as_str()) || msg.contains(t.as_str()))
                 };
                 let mut by_count = eligible.clone();
@@ -2211,6 +2244,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                                     "isNew": sig.is_new == Some(true),
                                     "ratio": opt_f64(sig.ratio),
                                     "sampleMessage": opt_str(sig.sample_message.as_deref()),
+                                    "sampleDetail": opt_str(sig.sample_detail.as_deref()),
                                     "relevanceClass": "direct",
                                     "relevanceReason": format!("event_code {} is raised by {} ({where_})", sig.key, raiser.name),
                                     "crossSignalJoin": true,
@@ -2232,7 +2266,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                             direct_signatures.push(DirectSignature {
                                 key: sig.key.clone(),
                                 count: sig.count,
-                                message: sig.sample_message.clone().unwrap_or_default(),
+                                message: sig.message_with_detail().unwrap_or_default(),
                             });
                             direct_ev_id_by_key.insert(sig.key.clone(), id.clone());
                             id
@@ -2241,7 +2275,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                     seed_emitted_joins.push(SeedEmittedJoin {
                         code: sig.key.clone(),
                         count: sig.count,
-                        message: sig.sample_message.clone().unwrap_or_default(),
+                        message: sig.message_with_detail().unwrap_or_default(),
                         ev_id,
                         level: sig.level.map(|l| l.as_str().to_string()),
                         raised_by_seed: raiser.id == t.id,
@@ -2302,6 +2336,67 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                     entity_summaries.push(format!("{}{plus} {f}", buckets.len()));
                 }
             }
+
+            // One error code often wraps several distinct failures behind a generic message
+            // ("Error updating product"). Break the loudest direct codes down by their failure
+            // detail so the dominant reason is visible, not just the template.
+            let mut detailed: Vec<&ErrorSignature> = a
+                .signatures
+                .iter()
+                .filter(|s| s.sample_detail_field.is_some() && s.key != "(none)" && direct_ev_id_by_key.contains_key(&s.key))
+                .collect();
+            detailed.sort_by(|x, y| js::cmp_f64(y.count, x.count));
+            for sig in detailed.into_iter().take(2) {
+                let Some(field) = sig.sample_detail_field.as_deref() else { continue };
+                let Ok(buckets) = logs
+                    .aggregate_errors(
+                        &LogQuery {
+                            service: input.service.clone(),
+                            from: Some(from.clone()),
+                            event_code: Some(sig.key.clone()),
+                            ..Default::default()
+                        },
+                        Some(field),
+                    )
+                    .await
+                else {
+                    continue;
+                };
+                if buckets.is_empty() {
+                    continue;
+                }
+                let top = buckets
+                    .iter()
+                    .take(3)
+                    .map(|b| format!("\"{}\" ({}x)", js::slice_chars(&redact_secrets(&b.key), 140), js::number_string(b.count)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let plus = if buckets.len() >= 20 { "+" } else { "" };
+                let e = ev.mk(
+                    EvidenceKind::Log,
+                    js::slice_chars(
+                        &format!("Failure reasons behind {} ({field}): {}{plus} distinct — {top}", sig.key, buckets.len()),
+                        400,
+                    ),
+                    json!({
+                        "field": field,
+                        "signature": sig.key,
+                        "distinctShown": buckets.len(),
+                        "capped": buckets.len() >= 20,
+                        "top": buckets
+                            .iter()
+                            .take(10)
+                            .map(|b| json!({ "key": redact_secrets(&b.key), "count": b.count }))
+                            .collect::<Vec<_>>(),
+                        "relevanceClass": "direct",
+                        "relevanceReason": format!("failure detail of direct signature {}", sig.key),
+                    }),
+                    EvidenceLinks::default(),
+                    None,
+                    Some(0.85),
+                );
+                log_ev_ids.push(e.id.clone());
+            }
             analysis = Some(a);
             Ok(())
         }
@@ -2352,7 +2447,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                             || seed_file_base.contains(&frame_file_base));
                     let services: Vec<String> = frame_file.iter().filter(|f| !f.is_empty()).cloned().collect();
                     let (classified, relevance_reason) =
-                        classify_log_relevance(&sig_key, &services, &sentry_terms, input.service.as_deref());
+                        classify_log_relevance(&sig_key, &services, &sentry_terms, input.service.as_deref(), None);
                     let relevance_class = if frame_matches_seed { LogRelevanceClass::Direct } else { classified };
                     let reason = if frame_matches_seed {
                         format!("Sentry frame at seed file {}", frame_file.clone().unwrap_or_default())
@@ -2469,7 +2564,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                             || seed_file_base.contains(&frame_file_base));
                     let services: Vec<String> = frame_file.iter().cloned().collect();
                     let (classified, relevance_reason) =
-                        classify_log_relevance(&sig_key, &services, &lens_terms, input.service.as_deref());
+                        classify_log_relevance(&sig_key, &services, &lens_terms, input.service.as_deref(), None);
                     let relevance_class = if frame_matches_seed { LogRelevanceClass::Direct } else { classified };
                     let reason = if frame_matches_seed {
                         format!("Lens report frame at seed file {}", frame.map(|f| f.filename.clone()).unwrap_or_default())
@@ -2590,7 +2685,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                     let sig_key = [msg.clone().unwrap_or_default(), svc.clone()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
                     let services: Vec<String> = if svc.is_empty() { vec![] } else { vec![svc.clone()] };
                     let (relevance_class, relevance_reason) =
-                        classify_log_relevance(&sig_key, &services, &axiom_terms, input.service.as_deref());
+                        classify_log_relevance(&sig_key, &services, &axiom_terms, input.service.as_deref(), None);
                     let lvl = level.as_deref().map(|l| format!("[{l}] ")).unwrap_or_default();
                     let body = msg.clone().unwrap_or_else(|| "(log event)".into());
                     let tag = if relevance_class == LogRelevanceClass::Ambient { " [ambient]" } else { "" };
@@ -3508,7 +3603,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
         let msg_clause = if lead.message.is_empty() {
             String::new()
         } else {
-            format!(" — \"{}\"", js::slice_chars(WS_RUN.replace_all(&lead.message, " ").trim(), 90))
+            format!(" — \"{}\"", js::slice_chars(WS_RUN.replace_all(&lead.message, " ").trim(), 200))
         };
         let by_seed = lead.raised_by_seed;
         let raiser = if by_seed || lead.raiser_name.is_empty() { t.name.clone() } else { lead.raiser_name.clone() };
@@ -3537,7 +3632,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
             };
             cause_inputs.push(cause(
                 "cause:seed-emitted-error",
-                js::slice_chars(&title, 220),
+                js::slice_chars(&title, 340),
                 "error-correlation",
                 source_ids,
                 base,
@@ -3569,14 +3664,14 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
             .await
         {
             let signals: Vec<SignalLike> =
-                warn.signatures.iter().map(|s| SignalLike { key: s.key.clone(), count: s.count, message: s.sample_message.clone() }).collect();
+                warn.signatures.iter().map(|s| SignalLike { key: s.key.clone(), count: s.count, message: s.message_with_detail() }).collect();
             if let Some(picked) = select_hint_matched_signal(&signals, &meaningful_hint_tokens) {
                 let tier = seed_emitted_severity_tier(None, &picked.code, Some(&picked.message));
                 let volume_boost = (picked.count.max(1.0).log10() * 0.03).min(0.1);
                 let msg_clause = if picked.message.is_empty() {
                     String::new()
                 } else {
-                    format!(" — \"{}\"", js::slice_chars(WS_RUN.replace_all(&picked.message, " ").trim(), 80))
+                    format!(" — \"{}\"", js::slice_chars(WS_RUN.replace_all(&picked.message, " ").trim(), 200))
                 };
                 let count = js::number_string(picked.count);
                 let id = ev
@@ -3606,7 +3701,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                             picked.code,
                             top_ref.map(|t| t.name.as_str()).unwrap_or("the seed")
                         ),
-                        220,
+                        340,
                     ),
                     "error-correlation",
                     vec![id],
@@ -3691,7 +3786,7 @@ pub async fn investigate(input: InvestigationInput, deps: EngineDeps<'_>) -> any
                 "Dependency/network failure: {}x {} — \"{}\"",
                 js::number_string(s.count),
                 s.key,
-                js::slice_chars(WS_RUN.replace_all(&s.message, " ").trim(), 100)
+                js::slice_chars(WS_RUN.replace_all(&s.message, " ").trim(), 200)
             ),
             "infrastructure",
             direct_log_ev_ids.iter().take(3).cloned().collect(),
